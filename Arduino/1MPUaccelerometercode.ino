@@ -36,7 +36,7 @@ void setup() {
     deltas[i] = 0.0;
   }
   Serial.begin(38400);
-  Wire.begin();
+  Wire.begin(21, 22);  // SDA, SCL
   setup_mpu();
 }
 
@@ -105,7 +105,7 @@ void record_mpu_accel() {
 }
 
   void print_accels() {
-    Serial.print("mpu_a_x:");
+    /*Serial.print("mpu_a_x:");
     Serial.print(mpu_a_x);
     Serial.print(' ');
     Serial.print("mpu_a_y:");
@@ -113,11 +113,11 @@ void record_mpu_accel() {
     Serial.print(' ');
     Serial.print("mpu_a_z:");
     Serial.print(mpu_a_z);
-    Serial.print(' ');
+    Serial.print(' '); */
     Serial.print("change over last second:");
     Serial.print(activity);
     Serial.print(' ');
     Serial.print("mpu_a_mag:");
     Serial.print(mpu_a_mag);
     Serial.println();
-  }
+  } 
