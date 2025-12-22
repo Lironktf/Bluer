@@ -16,8 +16,12 @@ static const int LSB_SENS_TABLE[4] {16384, 8192, 4096, 2048};
 #define ACCEL_SCALE 3
 const float LSB_SENS = LSB_SENS_TABLE[ACCEL_SCALE];
 
+bool empty = true;
+bool running = false;
 const int WINDOW = 20;   // 20 samples × 50 ms = 1 second
+const int WINDOWTWO = 30;   // 20 samples × 50 ms = 1 second
 int idx = 0;
+int idxtwo = 0;
 
 float
   mpu_a_x,
@@ -26,7 +30,10 @@ float
   mpu_a_mag,
   prev_mag = 0.0,
   deltas[WINDOW],
-  activity = 0
+  activities[WINDOWTWO],
+  activity = 0,
+  avg30 = 0, //easier way just always keep track of the average
+  sum30 = 0 //so we can calucate a new average every second
 ;
 
 //wifi credentials OLIVER ADD:
@@ -38,6 +45,9 @@ void setup() {
   for (int i = 0; i < WINDOW; i++) {
     deltas[i] = 0.0;
   }
+  for (int i = 0; i < WINDOWTWO; i++) {
+  activities[i] = 0.0;
+}
   Serial.begin(38400);
   Wire.begin(21, 22);  // SDA, SCL
 
@@ -55,6 +65,7 @@ void setup() {
 }
 
 void loop() {
+
   record_mpu_accel();
   mpu_a_mag = sqrt(mpu_a_x * mpu_a_x + mpu_a_y * mpu_a_y + mpu_a_z * mpu_a_z);
 
@@ -66,6 +77,22 @@ void loop() {
   activity += delta;
 
   idx = (idx + 1) % WINDOW;
+
+  if (idx == 0){ //Once every second, do this:
+    sum30 -= activities[idxtwo];
+    activities[idxtwo] = activity;
+    sum30 += activities[idxtwo];
+    idxtwo = (idxtwo + 1) % WINDOWTWO;
+
+    avg30 = sum30 / WINDOWTWO;
+    if (avg30 > 14){
+      running = true;
+      empty = false;
+    }
+    else {
+      running = false;
+    }
+  }
 
   print_accels();
   delay(50); 
@@ -117,7 +144,7 @@ void record_mpu_accel() {
   mpu_a_z = a_z_raw / LSB_SENS;
 }
 
-  void print_accels() {
+ void print_accels() {
     /*Serial.print("mpu_a_x:");
     Serial.print(mpu_a_x);
     Serial.print(' ');
@@ -132,5 +159,8 @@ void record_mpu_accel() {
     Serial.print(' ');
     Serial.print("mpu_a_mag:");
     Serial.print(mpu_a_mag);
+    Serial.println();
+    Serial.print("Running:");
+    Serial.println(running ? 1 : 0);
     Serial.println();
   } 
