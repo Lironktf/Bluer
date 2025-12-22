@@ -1,4 +1,6 @@
 #include <Wire.h>
+#include <Wifi.h>
+#include <HTTPClient.h>
 
 #define MPU_ADDR 0x68 // I2C address from datasheet (AD0 should be logic low, wire to GND)
 // x high 3B, x low 3C, y high 3D, y low 3E, z high 3F, z low 40
@@ -27,12 +29,28 @@ float
   activity = 0
 ;
 
+//wifi credentials OLIVER ADD:
+const char* ssid = "ENTER YOUR WIFI NAME";
+const char* password = "ENTER YOUR PASSWORD";
+
+
 void setup() {
   for (int i = 0; i < WINDOW; i++) {
     deltas[i] = 0.0;
   }
   Serial.begin(38400);
   Wire.begin(21, 22);  // SDA, SCL
+
+  // Connect to WiFi
+  Serial.println("Connecting to WiFi...");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED){
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\n✅ WiFi Connected!");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
   setup_mpu();
 }
 
