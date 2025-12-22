@@ -1,9 +1,5 @@
 #include <Wire.h>
 
-// MPU STUFF
-// Based on ElegooTutorial by Ricardo Moreno Jr.
-// https://github.com/rmorenojr/ElegooTutorial/blob/master/Lesson%2016%20-%20GY-521%20Module/MPU-6050_expanded/MPU-6050_expanded.ino
-
 #define MPU_ADDR 0x68 // I2C address from datasheet (AD0 should be logic low, wire to GND)
 // x high 3B, x low 3C, y high 3D, y low 3E, z high 3F, z low 40
 #define ACCEL_REG 0x3B
@@ -41,7 +37,6 @@ void setup() {
 }
 
 void loop() {
-
   record_mpu_accel();
   mpu_a_mag = sqrt(mpu_a_x * mpu_a_x + mpu_a_y * mpu_a_y + mpu_a_z * mpu_a_z);
 

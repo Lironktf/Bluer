@@ -1,0 +1,68 @@
+.card {
+  position: relative;
+  background-color: white;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  transition: all var(--transition);
+}
+
+.card:hover {
+  background-color: var(--color-hover-bg);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.broken {
+  background-color: var(--color-broken-bg) !important;
+}
+
+.reportButton {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  background: none;
+  border: none;
+  padding: 0.5rem;
+  color: var(--color-text-tertiary);
+  transition: var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.reportButton:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+  color: var(--color-text-primary);
+}
+
+.reportButton:active {
+  transform: scale(0.95);
+}
+
+.machineNumber {
+  font-size: 1.25rem;
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  margin-bottom: 1rem;
+  padding-right: 2rem;
+}
+
+.statusContainer {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.statusText {
+  font-size: 0.9375rem;
+  color: var(--color-text-secondary);
+  font-weight: var(--font-light);
+}
+
+.statusValue {
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+}

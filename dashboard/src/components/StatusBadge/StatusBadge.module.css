@@ -1,0 +1,19 @@
+.badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+  font-weight: var(--font-semibold);
+  font-size: 0.875rem;
+  text-align: center;
+  transition: var(--transition);
+}
+
+.active {
+  background-color: var(--color-success);
+  color: white;
+}
+
+.inactive {
+  background-color: var(--color-error);
+  color: white;
+}
