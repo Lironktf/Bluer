@@ -17,6 +17,7 @@ const float LSB_SENS = LSB_SENS_TABLE[ACCEL_SCALE];
 const int WINDOW = 20;   // 20 samples × 50 ms = 1 second
 int idx = 0;
 
+
 float
   mpu_a_x,
   mpu_a_y,
