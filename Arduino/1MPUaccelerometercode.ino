@@ -18,10 +18,15 @@ const float LSB_SENS = LSB_SENS_TABLE[ACCEL_SCALE];
 
 bool empty = true;
 bool running = false;
+bool dooropened = false;
+bool doorclosed = false;
 const int WINDOW = 20;   // 20 samples × 50 ms = 1 second
-const int WINDOWTWO = 30;   // 20 samples × 50 ms = 1 second
+const int WINDOWTWO = 15;   // 15 samples × 1 s (activity variable) = 15 seconds
+const int WINDOWTHREE = 4;   // 4 samples × 50 ms = 0.2 second to detect quick things like door latch
 int idx = 0;
 int idxtwo = 0;
+int idxthree = 0;
+int activitysmallIdx = 0;
 
 float
   mpu_a_x,
@@ -31,9 +36,13 @@ float
   prev_mag = 0.0,
   deltas[WINDOW],
   activities[WINDOWTWO],
+  deltastwo[WINDOWTHREE],
+  activitysmall = 0,
+  DYRERONTHRESHHOLD = 6.5,
+  activitysmallHistory[6],
   activity = 0,
-  avg30 = 0, //easier way just always keep track of the average
-  sum30 = 0 //so we can calucate a new average every second
+  avg15 = 0, //easier way just always keep track of the average
+  sum15 = 0 //so we can calucate a new average every second
 ;
 
 //wifi credentials OLIVER ADD:
@@ -48,6 +57,13 @@ void setup() {
   for (int i = 0; i < WINDOWTWO; i++) {
   activities[i] = 0.0;
 }
+  for (int i = 0; i < WINDOWTHREE; i++) {
+    deltastwo[i] = 0.0;
+  }
+  for (int i = 0; i < 6; i++) {
+  activitysmallHistory[i] = 0.0;
+}
+  
   Serial.begin(38400);
   Wire.begin(21, 22);  // SDA, SCL
 
@@ -78,20 +94,41 @@ void loop() {
 
   idx = (idx + 1) % WINDOW;
 
+  activitysmall -= deltastwo[idxthree]; 
+  deltastwo[idxthree] = delta; 
+  activitysmall += delta;
+  idxthree = (idxthree + 1) % WINDOWTHREE;
+  
+  activitysmallHistory[activitysmallIdx] = activitysmall;
+  activitysmallIdx = (activitysmallIdx + 1) % 6;
+
   if (idx == 0){ //Once every second, do this:
-    sum30 -= activities[idxtwo];
+    sum15 -= activities[idxtwo];
     activities[idxtwo] = activity;
-    sum30 += activities[idxtwo];
+    sum15 += activities[idxtwo];
     idxtwo = (idxtwo + 1) % WINDOWTWO;
 
-    avg30 = sum30 / WINDOWTWO;
-    if (avg30 > 14){
+    avg15 = sum15 / WINDOWTWO;
+    if (avg15 > DYRERONTHRESHHOLD){
       running = true;
-      empty = false;
+      empty = false
+      dooropened = false;
+      doorclosed = false;
     }
     else {
       running = false;
     }
+  }
+  float activitysmall6ago = activitysmallHistory[activitysmallIdx];
+
+  if (running == false && empty == false && dooropened == false){
+      if (activitysmall > (activitysmall6ago + 0.65)) dooropened = true;
+  }
+  if (running == false && empty == false && dooropened == true && doorclosed == false){
+      if (activitysmall > (activitysmall6ago + 3.4)) doorclosed = true;
+  }
+  if (dooropened == true && doorclosed == true){
+      empty = true;
   }
 
   print_accels();
