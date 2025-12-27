@@ -39,10 +39,12 @@ float
   deltastwo[WINDOWTHREE],
   activitysmall = 0,
   DYRERONTHRESHHOLD = 6.5,
-  activitysmallHistory[6],
+  DOOROPENINGCHANGE = 0.65,
+  DOORCLOSINGCHANGE = 2.65,
+  activitysmallHistory[6], //Holds history of last six small acitivties to capture the small activity 0.3s ago (6 x 50ms)
   activity = 0,
-  avg15 = 0, //easier way just always keep track of the average
-  sum15 = 0 //so we can calucate a new average every second
+  avg15 = 0, //Average activity over last 15 seconds (easier way just always keep track of the average)
+  sum15 = 0 //used to calucate a new average every second
 ;
 
 //wifi credentials OLIVER ADD:
@@ -51,7 +53,7 @@ const char* password = "ENTER YOUR PASSWORD";
 
 
 void setup() {
-  for (int i = 0; i < WINDOW; i++) {
+  for (int i = 0; i < WINDOW; i++) { //Initializing arrays
     deltas[i] = 0.0;
   }
   for (int i = 0; i < WINDOWTWO; i++) {
@@ -89,23 +91,22 @@ void loop() {
   prev_mag = mpu_a_mag;
 
   activity -= deltas[idx]; //Minusing the delta 20 samples ago to keep the activity limited to just the most recent 20 samples
-  deltas[idx] = delta; //record the delta now to delete in 20 samples from now
-  activity += delta;
-
-  idx = (idx + 1) % WINDOW;
+  deltas[idx] = delta; //record the delta now (to delete in 20 samples from now)
+  activity += delta; //add it to variable
+  idx = (idx + 1) % WINDOW; //increment index
 
   activitysmall -= deltastwo[idxthree]; 
   deltastwo[idxthree] = delta; 
   activitysmall += delta;
   idxthree = (idxthree + 1) % WINDOWTHREE;
   
-  activitysmallHistory[activitysmallIdx] = activitysmall;
-  activitysmallIdx = (activitysmallIdx + 1) % 6;
+  activitysmallHistory[activitysmallIdx] = activitysmall; //Store the value of small acitivty so later we can compre the old one (0.3s ago) to the current
+  activitysmallIdx = (activitysmallIdx + 1) % 6; //increment index
 
   if (idx == 0){ //Once every second, do this:
     sum15 -= activities[idxtwo];
     activities[idxtwo] = activity;
-    sum15 += activities[idxtwo];
+    sum15 += activities[idxtwo]; //sum15 holds sum of last 15 activities recorded
     idxtwo = (idxtwo + 1) % WINDOWTWO;
 
     avg15 = sum15 / WINDOWTWO;
@@ -119,13 +120,15 @@ void loop() {
       running = false;
     }
   }
-  float activitysmall6ago = activitysmallHistory[activitysmallIdx];
-
+  
+  float activitysmall6ago = activitysmallHistory[activitysmallIdx]; //This stores value of small acitivty change from 0.3 seconds ago to compare it to current small activity change to see if door opened/closed
+  //As idxthree was incremented before this, it now points to the item of the array that was recorded last, 6 cycles ago (0.3s)
+ 
   if (running == false && empty == false && dooropened == false){
-      if (activitysmall > (activitysmall6ago + 0.65)) dooropened = true;
+      if (activitysmall > (activitysmall6ago + DOOROPENINGCHANGE)) dooropened = true;
   }
   if (running == false && empty == false && dooropened == true && doorclosed == false){
-      if (activitysmall > (activitysmall6ago + 3.4)) doorclosed = true;
+      if (activitysmall > (activitysmall6ago + DOORCLOSINGCHANGE)) doorclosed = true;
   }
   if (dooropened == true && doorclosed == true){
       empty = true;
