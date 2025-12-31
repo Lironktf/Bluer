@@ -16,17 +16,19 @@ static const int LSB_SENS_TABLE[4] {16384, 8192, 4096, 2048};
 #define ACCEL_SCALE 3
 const float LSB_SENS = LSB_SENS_TABLE[ACCEL_SCALE];
 
-bool empty = true;
+bool empty = true; //Two status booleans sent to website
 bool running = false;
-bool dooropened = false;
+bool dooropened = false; //Two door latch booleans to help determine if clothes have been taken out
 bool doorclosed = false;
-const int WINDOW = 20;   // 20 samples × 50 ms = 1 second
-const int WINDOWTWO = 15;   // 15 samples × 1 s (activity variable) = 15 seconds
-const int WINDOWTHREE = 4;   // 4 samples × 50 ms = 0.2 second to detect quick things like door latch
-int idx = 0;
+const int WINDOW = 20;   // 20 samples × 50 ms = 1 second, used to make activity variable
+const int WINDOWTWO = 15;   // 15 samples of activity variable = 15 seconds of data
+const int WINDOWTHREE = 4;   // 4 samples × 50 ms = 0.2, used to make activity small variable, shorter time frame here to detect quick things like door latch
+int idx = 0; //Index variables to store array values
 int idxtwo = 0;
 int idxthree = 0;
 int activitysmallIdx = 0;
+int quiettime = 0; //Time between door opening and door opening, used to detect each event properly (seperatly) and to catch niche cases
+int doorCooldown = 0; //Used to stop door opening from becoming true due to the closing vibration in the case where the user is closing the door right after opening it
 
 float
   mpu_a_x,
@@ -34,13 +36,14 @@ float
   mpu_a_z,
   mpu_a_mag,
   prev_mag = 0.0,
-  deltas[WINDOW],
-  activities[WINDOWTWO],
-  deltastwo[WINDOWTHREE],
   activitysmall = 0,
-  DYRERONTHRESHHOLD = 6.5,
-  DOOROPENINGCHANGE = 0.65,
-  DOORCLOSINGCHANGE = 2.65,
+  activity = 0,
+  deltas[WINDOW], //Arrays that hold the values which make up the activity variables
+  deltastwo[WINDOWTHREE],
+  activities[WINDOWTWO], //Used to caluclates avg of last 15 seconds of activity
+  DYRERONTHRESHHOLD = 4.75, //Thresholds
+  DOOROPENINGCHANGE = 0.45,
+  DOORCLOSINGCHANGE = 0.9,
   activitysmallHistory[6], //Holds history of last six small acitivties to capture the small activity 0.3s ago (6 x 50ms)
   activity = 0,
   avg15 = 0, //Average activity over last 15 seconds (easier way just always keep track of the average)
@@ -123,17 +126,30 @@ void loop() {
   
   float activitysmall6ago = activitysmallHistory[activitysmallIdx]; //This stores value of small acitivty change from 0.3 seconds ago to compare it to current small activity change to see if door opened/closed
   //As idxthree was incremented before this, it now points to the item of the array that was recorded last, 6 cycles ago (0.3s)
- 
-  if (running == false && empty == false && dooropened == false){
+
+  //Detect door opening when machine is stopped and not empty (with cooldown**)
+  if (running == false && empty == false && dooropened == false && doorCooldown == 0){
       if (activitysmall > (activitysmall6ago + DOOROPENINGCHANGE)) dooropened = true;
+      quiettime = 0; // reset timer after opening event
   }
+  // Detect door closing after it has been opened
   if (running == false && empty == false && dooropened == true && doorclosed == false){
-      if (activitysmall > (activitysmall6ago + DOORCLOSINGCHANGE)) doorclosed = true;
+      if (activitysmall > (activitysmall6ago + DOORCLOSINGCHANGE) && quiettime > 20) doorclosed = true; //quiettime > 20 so that looks for door closing only after door opened has fully finished
+      quiettime++; // count time between open and close
   }
+  // Decide if machine is empty based on open–close duration
   if (dooropened == true && doorclosed == true){
-      empty = true;
+      if (quiettime > 80) empty = true;
+      else{ //Niche case, door was closed too fast, user is just checking if clothes are inside, not actually taking them out
+        dooropened = false; doorclosed = false;
+        doorCooldown = 20; //**so that it doesn't go back to first if statement right away so that condition won't be incorrectly satisfied
+      } 
   }
 
+  //20 -> 0, one second cooldown for niche case
+  if (doorCooldown > 0) {
+  doorCooldown--;
+  }
   print_accels();
   delay(50); 
 }
