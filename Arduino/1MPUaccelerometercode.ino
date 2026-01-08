@@ -41,7 +41,7 @@ float
   deltas[WINDOW], //Arrays that hold the values which make up the activity variables
   deltastwo[WINDOWTHREE],
   activities[WINDOWTWO], //Used to caluclates avg of last 15 seconds of activity
-  DYRERONTHRESHHOLD = 4.75, //Thresholds
+  DYRERONTHRESHHOLD = 3, //Thresholds
   DOOROPENINGCHANGE = 0.45,
   DOORCLOSINGCHANGE = 0.9,
   activitysmallHistory[6], //Holds history of last six small acitivties to capture the small activity 0.3s ago (6 x 50ms)
@@ -134,7 +134,7 @@ void loop() {
   }
   // Detect door closing after it has been opened
   if (running == false && empty == false && dooropened == true && doorclosed == false){
-      if (activitysmall > (activitysmall6ago + DOORCLOSINGCHANGE) && quiettime > 20) doorclosed = true; //quiettime > 20 so that looks for door closing only after door opened has fully finished
+      if (activitysmall > (activitysmall6ago + DOORCLOSINGCHANGE) && quiettime > 40) doorclosed = true; //quiettime > 40 so that looks for door closing only after door opened has fully finished
       quiettime++; // count time between open and close
   }
   // Decide if machine is empty based on open–close duration
