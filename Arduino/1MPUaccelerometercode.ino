@@ -50,6 +50,8 @@ float
   sum15 = 0 //used to calucate a new average every second
 ;
 
+int thresholdForOn = 14;
+
 //wifi credentials OLIVER ADD:
 const char* ssid = "ENTER YOUR WIFI NAME";
 const char* password = "ENTER YOUR PASSWORD";
