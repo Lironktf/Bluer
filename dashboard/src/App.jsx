@@ -13,10 +13,17 @@ function App() {
   // State for machine statuses from backend
   const [machineStatuses, setMachineStatuses] = useState({});
 
+  // State for last update time
+  const [lastUpdate, setLastUpdate] = useState(null);
+
+  // State for loading indicator
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
   // Fetch machine statuses from backend
   useEffect(() => {
     const fetchStatuses = async () => {
       try {
+        setIsRefreshing(true);
         console.log('🔍 Fetching machine statuses from:', `${BACKEND_URL}/api/machines`);
         const response = await fetch(`${BACKEND_URL}/api/machines`);
         const data = await response.json();
@@ -26,9 +33,12 @@ function App() {
         if (data.success) {
           console.log('✅ Machine statuses:', data.machines);
           setMachineStatuses(data.machines);
+          setLastUpdate(new Date());
         }
       } catch (error) {
         console.error('❌ Error fetching machine statuses:', error);
+      } finally {
+        setIsRefreshing(false);
       }
     };
 
@@ -78,13 +88,26 @@ function App() {
 
       <div className={styles.header}>
         <h1 className={styles.title}>LaunDryer</h1>
-        <p className={styles.subtitle}>Be Informed - Live ESP32 Data</p>
+        <p className={styles.subtitle}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+            {isRefreshing && <span style={{ fontSize: '12px' }}>🔄</span>}
+            Live ESP32 Data
+            {lastUpdate && (
+              <span style={{ fontSize: '12px', opacity: 0.7 }}>
+                • Updated {lastUpdate.toLocaleTimeString()}
+              </span>
+            )}
+          </span>
+        </p>
       </div>
 
       {machines.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
           <h2>No machines connected yet</h2>
           <p>Waiting for ESP32 devices to send data...</p>
+          <p style={{ fontSize: '14px', marginTop: '10px' }}>
+            {isRefreshing ? '🔄 Checking for devices...' : 'Auto-refreshing every 5 seconds'}
+          </p>
           <p style={{ fontSize: '12px', marginTop: '20px' }}>
             Check browser console (F12) for debug information
           </p>
