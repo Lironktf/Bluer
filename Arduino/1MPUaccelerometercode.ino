@@ -55,7 +55,7 @@ int thresholdForOn = 14;
 
 // Machine identification and server configuration
 const char* machineId = "a1-m1"; // e.g., "a1-m1", "a2-m5", "b1-m3"
-const char* serverUrl = "https://laun-dryer.vercel.app/api/machine/status";
+const char* serverUrl = "https://laun-dryer.vercel.app/api/machines";
 
 // Timing for sending updates (send every 5 seconds)
 unsigned long lastSendTime = 0;

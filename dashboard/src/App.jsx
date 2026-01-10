@@ -1,17 +1,12 @@
 import { useState, useEffect } from 'react';
-import { laundryData } from './data/mockData';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import Navigation from './components/Navigation/Navigation';
-import RoomSelector from './components/RoomSelector/RoomSelector';
 import MachineGrid from './components/MachineGrid/MachineGrid';
 import styles from './App.module.css';
 
 const BACKEND_URL = 'https://laun-dryer.vercel.app';
 
 function App() {
-  // State for selected room (default to first room)
-  const [selectedRoom, setSelectedRoom] = useState(laundryData.rooms[0].id);
-
   // State for broken machines (persisted in localStorage)
   const [brokenMachines, setBrokenMachines] = useLocalStorage('brokenMachines', {});
 
@@ -22,14 +17,18 @@ function App() {
   useEffect(() => {
     const fetchStatuses = async () => {
       try {
+        console.log('🔍 Fetching machine statuses from:', `${BACKEND_URL}/api/machines`);
         const response = await fetch(`${BACKEND_URL}/api/machines`);
         const data = await response.json();
 
+        console.log('📦 Received data:', data);
+
         if (data.success) {
+          console.log('✅ Machine statuses:', data.machines);
           setMachineStatuses(data.machines);
         }
       } catch (error) {
-        console.error('Error fetching machine statuses:', error);
+        console.error('❌ Error fetching machine statuses:', error);
       }
     };
 
@@ -42,26 +41,27 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Find the current room's machines
-  const currentRoom = laundryData.rooms.find(room => room.id === selectedRoom);
-  let machines = currentRoom ? currentRoom.machines : [];
+  // Convert backend data to machine array (only show machines that have reported)
+  const machines = Object.keys(machineStatuses).map(machineId => {
+    const status = machineStatuses[machineId];
 
-  // Merge backend data with mock data
-  machines = machines.map(machine => {
-    const backendStatus = machineStatuses[machine.id];
-    if (backendStatus) {
-      return {
-        ...machine,
-        isRunning: backendStatus.running,
-        isEmpty: backendStatus.empty
-      };
-    }
-    return machine;
+    // Extract machine number from ID (e.g., "a1-m3" -> number: 3)
+    const numberMatch = machineId.match(/m(\d+)$/);
+    const number = numberMatch ? parseInt(numberMatch[1]) : 0;
+
+    return {
+      id: machineId,
+      number: number,
+      isRunning: status.running,
+      isEmpty: status.empty
+    };
   });
 
-  // Handle room selection change
+  console.log('🔧 Displaying machines:', machines);
+
+  // Handle room selection change (not used anymore but keeping structure)
   const handleRoomChange = (roomId) => {
-    setSelectedRoom(roomId);
+    // No-op for now since we're not using rooms
   };
 
   // Handle report machine (permanent - adds to broken list)
@@ -78,20 +78,24 @@ function App() {
 
       <div className={styles.header}>
         <h1 className={styles.title}>LaunDryer</h1>
-        <p className={styles.subtitle}>Be Informed</p>
+        <p className={styles.subtitle}>Be Informed - Live ESP32 Data</p>
       </div>
 
-      <RoomSelector
-        rooms={laundryData.rooms}
-        selectedRoom={selectedRoom}
-        onRoomChange={handleRoomChange}
-      />
-
-      <MachineGrid
-        machines={machines}
-        brokenMachines={brokenMachines}
-        onReportMachine={handleReportMachine}
-      />
+      {machines.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
+          <h2>No machines connected yet</h2>
+          <p>Waiting for ESP32 devices to send data...</p>
+          <p style={{ fontSize: '12px', marginTop: '20px' }}>
+            Check browser console (F12) for debug information
+          </p>
+        </div>
+      ) : (
+        <MachineGrid
+          machines={machines}
+          brokenMachines={brokenMachines}
+          onReportMachine={handleReportMachine}
+        />
+      )}
     </div>
   );
 }
