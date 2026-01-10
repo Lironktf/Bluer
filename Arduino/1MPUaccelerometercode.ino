@@ -1,6 +1,7 @@
 #include <Wire.h>
 #include <Wifi.h>
 #include <HTTPClient.h>
+#include <credentials.h>
 
 #define MPU_ADDR 0x68 // I2C address from datasheet (AD0 should be logic low, wire to GND)
 // x high 3B, x low 3C, y high 3D, y low 3E, z high 3F, z low 40
@@ -52,10 +53,13 @@ float
 
 int thresholdForOn = 14;
 
-//wifi credentials OLIVER ADD:
-const char* ssid = "ENTER YOUR WIFI NAME";
-const char* password = "ENTER YOUR PASSWORD";
+// Machine identification and server configuration
+const char* machineId = "a1-m1"; // e.g., "a1-m1", "a2-m5", "b1-m3"
+const char* serverUrl = "https://laun-dryer.vercel.app/api/machine/status";
 
+// Timing for sending updates (send every 5 seconds)
+unsigned long lastSendTime = 0;
+const unsigned long sendInterval = 5000; // 5 seconds in milliseconds
 
 void setup() {
   for (int i = 0; i < WINDOW; i++) { //Initializing arrays
@@ -117,7 +121,7 @@ void loop() {
     avg15 = sum15 / WINDOWTWO;
     if (avg15 > DYRERONTHRESHHOLD){
       running = true;
-      empty = false
+      empty = false;
       dooropened = false;
       doorclosed = false;
     }
@@ -152,8 +156,16 @@ void loop() {
   if (doorCooldown > 0) {
   doorCooldown--;
   }
+
+  // Send status update to server every 5 seconds
+  unsigned long currentTime = millis();
+  if (currentTime - lastSendTime >= sendInterval) {
+    sendStatusUpdate();
+    lastSendTime = currentTime;
+  }
+
   print_accels();
-  delay(50); 
+  delay(50);
 }
 
 void setup_mpu() {
@@ -200,6 +212,36 @@ void record_mpu_accel() {
   mpu_a_x = a_x_raw / LSB_SENS;
   mpu_a_y = a_y_raw / LSB_SENS;
   mpu_a_z = a_z_raw / LSB_SENS;
+}
+
+void sendStatusUpdate() {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+
+    http.begin(serverUrl);
+    http.addHeader("Content-Type", "application/json");
+
+    // Create JSON payload
+    String jsonPayload = "{\"machineId\":\"" + String(machineId) +
+                        "\",\"running\":" + (running ? "true" : "false") +
+                        ",\"empty\":" + (empty ? "true" : "false") + "}";
+
+    int httpResponseCode = http.POST(jsonPayload);
+
+    if (httpResponseCode > 0) {
+      Serial.print("✅ Status sent: ");
+      Serial.println(httpResponseCode);
+      String response = http.getString();
+      Serial.println(response);
+    } else {
+      Serial.print("❌ Error sending status: ");
+      Serial.println(httpResponseCode);
+    }
+
+    http.end();
+  } else {
+    Serial.println("❌ WiFi not connected");
+  }
 }
 
  void print_accels() {
