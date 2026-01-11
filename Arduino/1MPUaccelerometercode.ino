@@ -1,5 +1,5 @@
 #include <Wire.h>
-#include <Wifi.h>
+#include <WiFi.h>
 #include <HTTPClient.h>
 #include <credentials.h>
 
@@ -46,7 +46,6 @@ float
   DOOROPENINGCHANGE = 0.45,
   DOORCLOSINGCHANGE = 0.9,
   activitysmallHistory[6], //Holds history of last six small acitivties to capture the small activity 0.3s ago (6 x 50ms)
-  activity = 0,
   avg15 = 0, //Average activity over last 15 seconds (easier way just always keep track of the average)
   sum15 = 0 //used to calucate a new average every second
 ;
@@ -142,10 +141,11 @@ void loop() {
   if (running == false && empty == false && dooropened == true && doorclosed == false){
       if (activitysmall > (activitysmall6ago + DOORCLOSINGCHANGE) && quiettime > 40) doorclosed = true; //quiettime > 40 so that looks for door closing only after door opened has fully finished
       quiettime++; // count time between open and close
+      if (quiettime > 2400) empty = true; //Machine is empty because door has been left open for > 2 minutes
   }
   // Decide if machine is empty based on open–close duration
   if (dooropened == true && doorclosed == true){
-      if (quiettime > 80) empty = true;
+      if (quiettime > 90) empty = true;
       else{ //Niche case, door was closed too fast, user is just checking if clothes are inside, not actually taking them out
         dooropened = false; doorclosed = false;
         doorCooldown = 20; //**so that it doesn't go back to first if statement right away so that condition won't be incorrectly satisfied
