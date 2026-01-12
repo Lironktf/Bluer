@@ -128,12 +128,9 @@ void sendStatusUpdate(String machineId, bool running, bool empty) {
     http.addHeader("Content-Type", "application/json");
 
     // Create JSON payload (same format as original WiFi version)
-    /*String jsonPayload = "{\"machineId\":\"" + machineId +
+   String jsonPayload = "{\"machineId\":\"" + machineId +
                         "\",\"running\":" + (running ? "true" : "false") +
-                        ",\"empty\":" + (empty ? "true" : "false") + "}";*/
-    char jsonPayload[100];
-sprintf(jsonPayload, "{\"machineId\":\"%s\",\"running\":%s,\"empty\":%s}",
-        machineId, running ? "true" : "false", empty ? "true" : "false");
+                        ",\"empty\":" + (empty ? "true" : "false") + "}";
 
     int httpResponseCode = http.POST(jsonPayload);
 
