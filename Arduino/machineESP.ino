@@ -49,8 +49,6 @@ float
   sum15 = 0 //used to calucate a new average every second
 ;
 
-int thresholdForOn = 14;
-
 // Machine identification
 const char* machineId = "a1-m1"; // e.g., "a1-m1", "a2-m5", "b1-m3"
 
@@ -151,10 +149,11 @@ void loop() {
   if (running == false && empty == false && dooropened == true && doorclosed == false){
       if (activitysmall > (activitysmall6ago + DOORCLOSINGCHANGE) && quiettime > 40) doorclosed = true; //quiettime > 40 so that looks for door closing only after door opened has fully finished
       quiettime++; // count time between open and close
+      if (quiettime > 2400) empty = true; //Machine is empty because door has been left open for > 2 minutes
   }
   // Decide if machine is empty based on open–close duration
   if (dooropened == true && doorclosed == true){
-      if (quiettime > 80) empty = true;
+      if (quiettime > 90) empty = true;
       else{ //Niche case, door was closed too fast, user is just checking if clothes are inside, not actually taking them out
         dooropened = false; doorclosed = false;
         doorCooldown = 20; //**so that it doesn't go back to first if statement right away so that condition won't be incorrectly satisfied
