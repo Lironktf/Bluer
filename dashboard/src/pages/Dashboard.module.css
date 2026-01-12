@@ -1,0 +1,42 @@
+.app {
+  min-height: 100vh;
+  width: 100%;
+}
+
+.header {
+  padding: 2rem 1rem 1rem;
+  text-align: center;
+}
+
+@media (min-width: 768px) {
+  .header {
+    padding: 3rem 2rem 1.5rem;
+  }
+}
+
+.title {
+  font-size: 2rem;
+  font-weight: var(--font-semibold);
+  color: var(--color-text-primary);
+  letter-spacing: -0.02em;
+  margin: 0 0 0.5rem 0;
+}
+
+@media (min-width: 768px) {
+  .title {
+    font-size: 2.5rem;
+  }
+}
+
+.subtitle {
+  font-size: 1.125rem;
+  font-weight: var(--font-light);
+  color: var(--color-text-tertiary);
+  margin: 0;
+}
+
+@media (min-width: 768px) {
+  .subtitle {
+    font-size: 1.25rem;
+  }
+}

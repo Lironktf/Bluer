@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import styles from './Navigation.module.css';
 
 export default function Navigation() {
@@ -42,22 +43,20 @@ export default function Navigation() {
       {/* Menu buttons that appear when open */}
       {isOpen && (
         <div className={styles.menuButtons}>
-          <a
-            href="/about/"
+          <Link
+            to="/about"
             className={styles.menuButton}
+            onClick={() => setIsOpen(false)}
           >
             About
-          </a>
-          <a
-            href="/"
+          </Link>
+          <Link
+            to="/"
             className={styles.menuButton}
-            onClick={(e) => {
-              e.preventDefault();
-              setIsOpen(false);
-            }}
+            onClick={() => setIsOpen(false)}
           >
-            Rooms
-          </a>
+            Dashboard
+          </Link>
         </div>
       )}
     </nav>
