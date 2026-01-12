@@ -3,8 +3,11 @@
 #include <BLEAdvertisedDevice.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
-#include <credentials.h>
+//#include <credentials.h>
 #include <map>
+
+const char* ssid = "Jeff 5G Home Network";
+const char* password = "Brodie1998";
 
 // Server configuration
 const char* serverUrl = "https://laun-dryer.vercel.app/api/machines";
@@ -33,11 +36,12 @@ const unsigned long HEARTBEAT_INTERVAL = 30000;
 const unsigned long OFFLINE_TIMEOUT = 60000;
 
 // Callback class for BLE scan results
+void updateMachineState(String macAddr, String machineId, bool running, bool empty);
 class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
   void onResult(BLEAdvertisedDevice advertisedDevice) {
     // Check if device has manufacturer data
     if (advertisedDevice.haveManufacturerData()) {
-      std::string manufData = advertisedDevice.getManufacturerData();
+      String manufData = advertisedDevice.getManufacturerData();
 
       // Check if this is our laundry machine format (10 bytes, Company ID 0xFFFF)
       if (manufData.length() == 10 &&
@@ -68,7 +72,7 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
         updateMachineState(macAddr, machineId, running, empty);
 
         // Debug output
-        Serial.print("=ñ BLE Device: ");
+        Serial.print("=Ã± BLE Device: ");
         Serial.print(macAddr);
         Serial.print(" | Machine: ");
         Serial.print(machineId);
@@ -96,7 +100,7 @@ void updateMachineState(String macAddr, String machineId, bool running, bool emp
     newMachine.stateChanged = true; // Mark as changed to send initial state
     machines[macAddr] = newMachine;
 
-    Serial.print("<• New machine discovered: ");
+    Serial.print("<â€¢ New machine discovered: ");
     Serial.println(machineId);
   } else {
     // Existing machine - check if state changed
@@ -104,7 +108,7 @@ void updateMachineState(String macAddr, String machineId, bool running, bool emp
 
     if (machine.running != running || machine.empty != empty) {
       // State changed!
-      Serial.print("= State change detected for ");
+      Serial.print("= State change detected for ");
       Serial.println(machineId);
       machine.stateChanged = true;
     }
@@ -124,9 +128,12 @@ void sendStatusUpdate(String machineId, bool running, bool empty) {
     http.addHeader("Content-Type", "application/json");
 
     // Create JSON payload (same format as original WiFi version)
-    String jsonPayload = "{\"machineId\":\"" + machineId +
+    /*String jsonPayload = "{\"machineId\":\"" + machineId +
                         "\",\"running\":" + (running ? "true" : "false") +
-                        ",\"empty\":" + (empty ? "true" : "false") + "}";
+                        ",\"empty\":" + (empty ? "true" : "false") + "}";*/
+    char jsonPayload[100];
+sprintf(jsonPayload, "{\"machineId\":\"%s\",\"running\":%s,\"empty\":%s}",
+        machineId, running ? "true" : "false", empty ? "true" : "false");
 
     int httpResponseCode = http.POST(jsonPayload);
 
@@ -176,7 +183,7 @@ void processMachineUpdates() {
     // Warn if machine went offline
     if (!isOnline && timeSinceLastSeen < (OFFLINE_TIMEOUT + 5000)) {
       // Only print once when it first goes offline
-      Serial.print("  Machine ");
+      Serial.print("Â  Machine ");
       Serial.print(machine.machineId);
       Serial.println(" appears offline (no BLE signal)");
     }
@@ -198,7 +205,7 @@ void setup() {
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n WiFi Connected!");
+    Serial.println("\n WiFi Connected!");
     Serial.print("IP: ");
     Serial.println(WiFi.localIP());
   } else {
@@ -216,13 +223,13 @@ void setup() {
   pBLEScan->setInterval(100);
   pBLEScan->setWindow(99);  // Less or equal to setInterval value
 
-  Serial.println(" BLE Scanner ready!");
-  Serial.println("= Scanning for laundry machines...");
+  Serial.println(" BLE Scanner ready!");
+  Serial.println("= Scanning for laundry machines...");
 }
 
 void loop() {
   // Start BLE scan
-  BLEScanResults foundDevices = pBLEScan->start(SCAN_TIME, false);
+  pBLEScan->start(SCAN_TIME, false);
 
   // Clear results to free memory
   pBLEScan->clearResults();
@@ -232,7 +239,7 @@ void loop() {
 
   // Check WiFi connection and reconnect if needed
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("  WiFi disconnected, attempting reconnect...");
+    Serial.println(" WiFi disconnected, attempting reconnect...");
     WiFi.reconnect();
   }
 
