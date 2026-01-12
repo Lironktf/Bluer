@@ -255,7 +255,12 @@ void updateAdvertisement() {
 
   // Set manufacturer data in advertisement
   BLEAdvertisementData advData;
-  advData.setManufacturerData(std::string((char*)manufData, 10));
+  //advData.setManufacturerData(std::string((char*)manufData, 10));
+  String mfg;
+  for (int i = 0; i < 10; i++) {
+    mfg += (char)manufData[i];
+  }
+  advData.setManufacturerData(mfg);
   pAdvertising->setAdvertisementData(advData);
 
   Serial.print("📡 BLE Advertisement updated - Running: ");
