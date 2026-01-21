@@ -63,24 +63,39 @@ unsigned long lastAdvUpdate = 0;
 BLEAdvertising *pAdvertising;
 
 void setup() {
-  for (int i = 0; i < WINDOW; i++) { //Initializing arrays
+  Serial.begin(38400);
+  delay(500);
+
+  Serial.println("\n\n========================================");
+  Serial.println("   Laundry Machine Monitor");
+  Serial.printf("   Machine ID: %s\n", machineId);
+  Serial.println("========================================\n");
+
+  // Initialize arrays
+  Serial.println("[INIT] Initializing sensor arrays...");
+  for (int i = 0; i < WINDOW; i++) {
     deltas[i] = 0.0;
   }
   for (int i = 0; i < WINDOWTWO; i++) {
-  activities[i] = 0.0;
-}
+    activities[i] = 0.0;
+  }
   for (int i = 0; i < WINDOWTHREE; i++) {
     deltastwo[i] = 0.0;
   }
   for (int i = 0; i < 6; i++) {
-  activitysmallHistory[i] = 0.0;
-}
+    activitysmallHistory[i] = 0.0;
+  }
 
-  Serial.begin(38400);
-  Wire.begin(21, 22);  // SDA, SCL
+  // Initialize I2C for accelerometer
+  Serial.println("[INIT] Setting up I2C (SDA=21, SCL=22)...");
+  Wire.begin(21, 22);
+
+  // Initialize accelerometer
+  Serial.println("[INIT] Configuring MPU-6050 accelerometer...");
+  setup_mpu();
 
   // Initialize BLE
-  Serial.println("Initializing BLE...");
+  Serial.println("[BLE] Initializing BLE advertising...");
   BLEDevice::init("LaundryMachine");
   pAdvertising = BLEDevice::getAdvertising();
 
@@ -93,9 +108,11 @@ void setup() {
 
   // Start advertising
   BLEDevice::startAdvertising();
-  Serial.println("✅ BLE Advertising started!");
+  Serial.println("[BLE] Advertising started!");
 
-  setup_mpu();
+  Serial.println("\n========================================");
+  Serial.println("System ready! Starting monitoring...");
+  Serial.println("========================================\n");
 }
 
 void loop() {
@@ -126,13 +143,21 @@ void loop() {
     idxtwo = (idxtwo + 1) % WINDOWTWO;
 
     avg15 = sum15 / WINDOWTWO;
+    bool wasRunning = running;
+
     if (avg15 > DYRERONTHRESHHOLD){
+      if (!wasRunning) {
+        Serial.println("[STATE] Machine started running!");
+      }
       running = true;
       empty = false;
       dooropened = false;
       doorclosed = false;
     }
     else {
+      if (wasRunning) {
+        Serial.println("[STATE] Machine stopped");
+      }
       running = false;
     }
   }
@@ -142,19 +167,29 @@ void loop() {
 
   //Detect door opening when machine is stopped and not empty (with cooldown**)
   if (running == false && empty == false && dooropened == false && doorCooldown == 0){
-      if (activitysmall > (activitysmall6ago + DOOROPENINGCHANGE)) dooropened = true;
+      if (activitysmall > (activitysmall6ago + DOOROPENINGCHANGE)) {
+        dooropened = true;
+        Serial.println("[DOOR] Door opened!");
+      }
       quiettime = 0; // reset timer after opening event
   }
   // Detect door closing after it has been opened
   if (running == false && empty == false && dooropened == true && doorclosed == false){
-      if (activitysmall > (activitysmall6ago + DOORCLOSINGCHANGE) && quiettime > 40) doorclosed = true; //quiettime > 40 so that looks for door closing only after door opened has fully finished
+      if (activitysmall > (activitysmall6ago + DOORCLOSINGCHANGE) && quiettime > 40) {
+        doorclosed = true;
+        Serial.printf("[DOOR] Door closed (quiet time: %d cycles)\n", quiettime);
+      }
       quiettime++; // count time between open and close
       if (quiettime > 2400) empty = true; //Machine is empty because door has been left open for > 2 minutes
   }
   // Decide if machine is empty based on open–close duration
   if (dooropened == true && doorclosed == true){
-      if (quiettime > 90) empty = true;
+      if (quiettime > 80) {
+        empty = true;
+        Serial.println("[STATE] Machine is now EMPTY (clothes removed)");
+      }
       else{ //Niche case, door was closed too fast, user is just checking if clothes are inside, not actually taking them out
+        Serial.println("[DOOR] Quick open/close detected - user just checking");
         dooropened = false; doorclosed = false;
         doorCooldown = 20; //**so that it doesn't go back to first if statement right away so that condition won't be incorrectly satisfied
       }
@@ -263,10 +298,10 @@ void updateAdvertisement() {
   advData.setManufacturerData(mfg);
   pAdvertising->setAdvertisementData(advData);
 
-  Serial.print("📡 BLE Advertisement updated - Running: ");
-  Serial.print(running ? "YES" : "NO");
-  Serial.print(", Empty: ");
-  Serial.println(empty ? "YES" : "NO");
+  Serial.printf("[BLE] Advertisement updated - Machine: %s | Running: %s | Empty: %s\n",
+               machineId,
+               running ? "YES" : "NO",
+               empty ? "YES" : "NO");
 }
 
  void print_accels() {
