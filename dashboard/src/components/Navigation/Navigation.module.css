@@ -116,9 +116,9 @@
 .loginButton,
 .logoutButton {
   padding: 0.875rem 1.5rem;
-  background-color: #3b82f6;
-  color: white;
-  border: none;
+  background-color: white;
+  color: black;
+  border: 1px solid black; /* Adding a border for visibility */
   border-radius: var(--radius);
   font-size: 1rem;
   font-weight: 600;
@@ -128,16 +128,18 @@
 }
 
 .loginButton:hover {
-  background-color: #2563eb;
+  background-color: #eee;
   transform: translateX(4px);
 }
 
 .logoutButton {
-  background-color: #ef4444;
+  background-color: white;
+  color: black;
+  border: 1px solid black; /* Adding a border for visibility */
   font-size: 0.9rem;
   padding: 0.5rem 1rem;
 }
 
 .logoutButton:hover {
-  background-color: #dc2626;
+  background-color: #eee;
 }

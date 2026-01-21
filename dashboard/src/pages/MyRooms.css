@@ -22,9 +22,9 @@
 }
 
 .add-room-btn {
-  background-color: #3b82f6;
-  color: white;
-  border: none;
+  background-color: white;
+  color: black;
+  border: 1px solid black; /* Adding a border for visibility */
   padding: 0.75rem 1.5rem;
   border-radius: 8px;
   font-size: 1rem;
@@ -120,9 +120,9 @@
 }
 
 .save-btn {
-  background-color: #10b981;
-  color: white;
-  border: none;
+  background-color: white;
+  color: black;
+  border: 1px solid black; /* Adding a border for visibility */
   padding: 0.75rem 1.5rem;
   border-radius: 8px;
   font-size: 1rem;
@@ -251,9 +251,9 @@
 }
 
 .login-btn {
-  background-color: #3b82f6;
-  color: white;
-  border: none;
+  background-color: white;
+  color: black;
+  border: 1px solid black; /* Adding a border for visibility */
   padding: 0.875rem 2rem;
   border-radius: 8px;
   font-size: 1rem;

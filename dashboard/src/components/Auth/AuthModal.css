@@ -106,8 +106,8 @@
 }
 
 .auth-submit-btn {
-  background-color: #3b82f6;
-  color: white;
+  background-color: white;
+  color: black;
   border: none;
   padding: 0.875rem;
   border-radius: 8px;
