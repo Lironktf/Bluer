@@ -31,43 +31,6 @@ export default function MyRooms() {
     }
   }, [isAuthenticated, authLoading]);
 
-  // Add dummy room if it doesn't exist
-  useEffect(() => {
-    if (isAuthenticated && rooms.length > 0 && !rooms.some(room => room.name === 'SJU-Ryan/Sieg')) {
-      const addDummyRoom = async () => {
-        const token = Cookies.get('auth_token');
-        if (!token) return;
-
-        try {
-          const response = await fetch(`${API_BASE_URL}/api/rooms`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({
-              name: 'SJU-Ryan/Sieg',
-              building: 'SJU',
-              floor: 'Ground',
-              machineIds: ['sju-ryan-1', 'sju-ryan-2']
-            })
-          });
-
-          if (response.ok) {
-            console.log('Dummy room "SJU-Ryan/Sieg" added.');
-            fetchRooms(); // Re-fetch rooms to include the new dummy room
-          } else {
-            console.error('Failed to add dummy room:', await response.json());
-          }
-        } catch (error) {
-          console.error('Error adding dummy room:', error);
-        }
-      };
-      addDummyRoom();
-    }
-  }, [isAuthenticated, rooms]);
-
-
   async function fetchRooms() {
     const token = Cookies.get('auth_token');
     if (!token) return;
@@ -92,17 +55,16 @@ export default function MyRooms() {
 
   async function handleSaveRoom(roomData) {
     const token = Cookies.get('auth_token');
-    const method = editingRoom ? 'PUT' : 'POST';
-    const body = editingRoom ? { ...roomData, roomId: editingRoom._id } : roomData;
+    if (!editingRoom) return; // Should not happen
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/rooms`, {
-        method,
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify({ ...roomData, roomId: editingRoom._id })
       });
 
       if (response.ok) {
@@ -230,14 +192,14 @@ export default function MyRooms() {
 
         {!selectedRoom && !showRoomForm && rooms.length > 0 && (
           <div className="empty-state">
-            <p>Select a room to view its details, or add a new one.</p>
+            <p>Select a room to view its details.</p>
           </div>
         )}
 
         {rooms.length === 0 && !showRoomForm && (
           <div className="empty-state">
-            <p>You haven't added any rooms yet.</p>
-            <p>Rooms can only be added from the employer section.</p>
+            <p>You have no rooms assigned to you.</p>
+            <p>Contact your administrator to get access to rooms.</p>
           </div>
         )}
       </div>
