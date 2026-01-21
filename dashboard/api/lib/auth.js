@@ -1,6 +1,9 @@
 // Authentication utilities for JWT tokens and password hashing
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import bcryptjs from 'bcryptjs';
+import jsonwebtoken from 'jsonwebtoken';
+
+const bcrypt = bcryptjs;
+const jwt = jsonwebtoken;
 
 // JWT secret - should be set in environment variables
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';

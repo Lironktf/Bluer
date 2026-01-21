@@ -23,8 +23,6 @@ export async function connectToDatabase() {
 
   // Create new connection
   const client = await MongoClient.connect(MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
   });
 
   const db = client.db(MONGODB_DB);

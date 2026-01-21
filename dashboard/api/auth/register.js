@@ -22,15 +22,20 @@ export default async function handler(req, res) {
   }
 
   try {
+    console.log('📝 Registration attempt started');
     const { email, password, username } = req.body;
 
     // Validate input
     if (!email || !password || !username) {
+      console.log('❌ Missing required fields');
       return res.status(400).json({
         success: false,
         error: 'Email, username, and password are required'
       });
     }
+
+    console.log(`📝 Registering user: ${username} (${email})`);
+
 
     // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -57,14 +62,18 @@ export default async function handler(req, res) {
       });
     }
 
+    console.log('🔗 Connecting to database...');
     const users = await getCollection('users');
+    console.log('✅ Database connected');
 
     // Check if user already exists
+    console.log('🔍 Checking for existing user...');
     const existingUser = await users.findOne({
       $or: [{ email: email.toLowerCase() }, { username: username.toLowerCase() }]
     });
 
     if (existingUser) {
+      console.log('❌ User already exists');
       return res.status(409).json({
         success: false,
         error: existingUser.email === email.toLowerCase()
@@ -74,7 +83,9 @@ export default async function handler(req, res) {
     }
 
     // Hash password
+    console.log('🔐 Hashing password...');
     const hashedPassword = await hashPassword(password);
+    console.log('✅ Password hashed');
 
     // Create user document
     const newUser = {
@@ -87,9 +98,12 @@ export default async function handler(req, res) {
       updatedAt: new Date()
     };
 
+    console.log('💾 Inserting user into database...');
     const result = await users.insertOne(newUser);
+    console.log('✅ User inserted with ID:', result.insertedId);
 
     // Generate JWT token
+    console.log('🎫 Generating JWT token...');
     const token = generateToken({
       _id: result.insertedId,
       email: newUser.email,
@@ -111,10 +125,11 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('❌ Registration error:', error);
+    console.error('Error stack:', error.stack);
     return res.status(500).json({
       success: false,
       error: 'Internal server error',
-      message: error.message
+      message: process.env.NODE_ENV === 'development' ? error.message : 'Registration failed'
     });
   }
 }
