@@ -52,7 +52,7 @@ export default function RoomForm({ editingRoom, onSave, onCancel }) {
             <input
               type="text"
               value={building}
-              onChange={(e) => setBuilding(e.g., 'Building A')}
+              onChange={(e) => setBuilding(e.target.value)}
               placeholder="e.g., Building A"
             />
           </div>
