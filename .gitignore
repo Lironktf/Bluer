@@ -1,6 +1,8 @@
 # WiFi Credentials
 Arduino/credentials.h
 
+dashboard/.env
+
 # Node modules
 node_modules/
 
