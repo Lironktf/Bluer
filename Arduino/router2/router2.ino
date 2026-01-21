@@ -246,16 +246,17 @@ void loop() {
 
     Serial.printf("\n[SCAN] Starting BLE scan (duration: %ds)...\n", SCAN_DURATION_SEC);
 
-    // Scan for devices (blocking call)
-    NimBLEScanResults* pResults = pBLEScan->start(SCAN_DURATION_SEC, false);
+    // Scan for devices (blocking call) - returns true on success
+    if (pBLEScan->start(SCAN_DURATION_SEC, false)) {
+      // Get the scan results
+      NimBLEScanResults results = pBLEScan->getResults();
+      int count = results.getCount();
 
-    if (pResults) {
-      int count = pResults->getCount();
       Serial.printf("[SCAN] Scan complete. Found %d total BLE devices\n", count);
 
       // Process each discovered device
       for (int i = 0; i < count; i++) {
-        NimBLEAdvertisedDevice* device = pResults->getDevice(i);
+        const NimBLEAdvertisedDevice* device = results.getDevice(i);
 
         // Check if device has manufacturer data
         if (device->haveManufacturerData()) {
@@ -302,6 +303,8 @@ void loop() {
 
       // Clear results to free memory
       pBLEScan->clearResults();
+    } else {
+      Serial.println("[SCAN] Scan failed!");
     }
   }
 
