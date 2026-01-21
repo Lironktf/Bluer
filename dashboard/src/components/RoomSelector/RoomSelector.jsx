@@ -7,7 +7,7 @@ export default function RoomSelector({ rooms, selectedRoom, onRoomChange }) {
   const containerRef = useRef(null);
 
   // Get the selected room name
-  const selectedRoomName = rooms.find(room => room.id === selectedRoom)?.name || '';
+  const selectedRoomName = rooms.find(room => room._id === selectedRoom)?.name || '';
 
   // Filter rooms based on search term
   const filteredRooms = rooms.filter(room =>
@@ -19,7 +19,6 @@ export default function RoomSelector({ rooms, selectedRoom, onRoomChange }) {
     function handleClickOutside(event) {
       if (containerRef.current && !containerRef.current.contains(event.target)) {
         setIsOpen(false);
-        setSearchTerm('');
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
@@ -47,13 +46,13 @@ export default function RoomSelector({ rooms, selectedRoom, onRoomChange }) {
           onChange={(e) => setSearchTerm(e.target.value)}
           onFocus={() => setIsOpen(true)}
         />
-        {isOpen && filteredRooms.length > 0 && (
+        {isOpen && (
           <ul className={styles.dropdown}>
             {filteredRooms.map((room) => (
               <li
-                key={room.id}
-                className={`${styles.option} ${room.id === selectedRoom ? styles.selected : ''}`}
-                onClick={() => handleSelect(room.id)}
+                key={room._id}
+                className={`${styles.option} ${room._id === selectedRoom ? styles.selected : ''}`}
+                onClick={() => handleSelect(room._id)}
               >
                 {room.name}
               </li>

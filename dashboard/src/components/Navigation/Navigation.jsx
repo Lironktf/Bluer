@@ -59,31 +59,24 @@ export default function Navigation() {
         {isOpen && (
           <div className={styles.menuButtons}>
             <Link
-              to="/"
-              className={styles.menuButton}
-              onClick={() => setIsOpen(false)}
-            >
-              Dashboard
-            </Link>
-            <Link
               to="/about"
               className={styles.menuButton}
               onClick={() => setIsOpen(false)}
             >
               About
             </Link>
+            <Link
+              to="/"
+              className={styles.menuButton}
+              onClick={() => setIsOpen(false)}
+            >
+              Rooms
+            </Link>
 
             {/* User section */}
             <div className={styles.userSection}>
               {isAuthenticated ? (
                 <>
-                  <Link
-                    to="/my-rooms"
-                    className={styles.menuButton}
-                    onClick={() => setIsOpen(false)}
-                  >
-                    My Rooms
-                  </Link>
                   <div className={styles.userInfo}>
                     <span className={styles.username}>{user.displayName}</span>
                     <button

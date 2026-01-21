@@ -4,53 +4,9 @@ import styles from './About.module.css';
 
 export default function About() {
   const [activeTab, setActiveTab] = useState('attach');
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  // Close menu when clicking outside
-  useEffect(() => {
-    function handleClickOutside(event) {
-      const hamburger = document.getElementById('hamburger');
-      const menuButtons = document.getElementById('menuButtons');
-
-      if (hamburger && menuButtons &&
-          !hamburger.contains(event.target) &&
-          !menuButtons.contains(event.target)) {
-        setMenuOpen(false);
-      }
-    }
-
-    if (menuOpen) {
-      document.addEventListener('click', handleClickOutside);
-    }
-
-    return () => {
-      document.removeEventListener('click', handleClickOutside);
-    };
-  }, [menuOpen]);
 
   return (
     <div className={styles.aboutPage}>
-      {/* Navigation Menu */}
-      <nav className={styles.nav}>
-        <button
-          className={styles.hamburger}
-          id="hamburger"
-          onClick={() => setMenuOpen(!menuOpen)}
-          aria-label="Toggle menu"
-        >
-          <span className={styles.line}></span>
-          <span className={styles.line}></span>
-          <span className={styles.line}></span>
-        </button>
-        <div
-          className={`${styles.menuButtons} ${menuOpen ? styles.open : ''}`}
-          id="menuButtons"
-        >
-          <Link to="/about" className={styles.menuButton} onClick={() => setMenuOpen(false)}>About</Link>
-          <Link to="/" className={styles.menuButton} onClick={() => setMenuOpen(false)}>Rooms</Link>
-        </div>
-      </nav>
-
       <div className={styles.container}>
         {/* Hero Section with Washing Machine */}
         <section className={styles.hero}>

@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Navigation from '../components/Navigation/Navigation';
 import AuthModal from '../components/Auth/AuthModal';
+import RoomSelector from '../components/RoomSelector/RoomSelector';
+import RoomForm from '../components/RoomForm/RoomForm';
 import Cookies from 'js-cookie';
 import './MyRooms.css';
 
@@ -15,14 +17,9 @@ export default function MyRooms() {
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [showAddRoom, setShowAddRoom] = useState(false);
+  const [selectedRoomId, setSelectedRoomId] = useState(null);
   const [editingRoom, setEditingRoom] = useState(null);
-
-  // Form state
-  const [roomName, setRoomName] = useState('');
-  const [building, setBuilding] = useState('');
-  const [floor, setFloor] = useState('');
-  const [machineIds, setMachineIds] = useState('');
+  const [showRoomForm, setShowRoomForm] = useState(false);
 
   useEffect(() => {
     if (!authLoading) {
@@ -33,6 +30,43 @@ export default function MyRooms() {
       }
     }
   }, [isAuthenticated, authLoading]);
+
+  // Add dummy room if it doesn't exist
+  useEffect(() => {
+    if (isAuthenticated && rooms.length > 0 && !rooms.some(room => room.name === 'SJU-Ryan/Sieg')) {
+      const addDummyRoom = async () => {
+        const token = Cookies.get('auth_token');
+        if (!token) return;
+
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/rooms`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              name: 'SJU-Ryan/Sieg',
+              building: 'SJU',
+              floor: 'Ground',
+              machineIds: ['sju-ryan-1', 'sju-ryan-2']
+            })
+          });
+
+          if (response.ok) {
+            console.log('Dummy room "SJU-Ryan/Sieg" added.');
+            fetchRooms(); // Re-fetch rooms to include the new dummy room
+          } else {
+            console.error('Failed to add dummy room:', await response.json());
+          }
+        } catch (error) {
+          console.error('Error adding dummy room:', error);
+        }
+      };
+      addDummyRoom();
+    }
+  }, [isAuthenticated, rooms]);
+
 
   async function fetchRooms() {
     const token = Cookies.get('auth_token');
@@ -56,42 +90,25 @@ export default function MyRooms() {
     }
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault();
+  async function handleSaveRoom(roomData) {
     const token = Cookies.get('auth_token');
-
-    const roomData = {
-      name: roomName,
-      building,
-      floor,
-      machineIds: machineIds.split(',').map(id => id.trim()).filter(Boolean)
-    };
+    const method = editingRoom ? 'PUT' : 'POST';
+    const body = editingRoom ? { ...roomData, roomId: editingRoom._id } : roomData;
 
     try {
-      let response;
-      if (editingRoom) {
-        response = await fetch(`${API_BASE_URL}/api/rooms`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ ...roomData, roomId: editingRoom._id })
-        });
-      } else {
-        response = await fetch(`${API_BASE_URL}/api/rooms`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(roomData)
-        });
-      }
+      const response = await fetch(`${API_BASE_URL}/api/rooms`, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(body)
+      });
 
       if (response.ok) {
         await fetchRooms();
-        resetForm();
+        setShowRoomForm(false);
+        setEditingRoom(null);
       }
     } catch (error) {
       console.error('Failed to save room:', error);
@@ -113,29 +130,14 @@ export default function MyRooms() {
 
       if (response.ok) {
         await fetchRooms();
+        setSelectedRoomId(null);
       }
     } catch (error) {
       console.error('Failed to delete room:', error);
     }
   }
 
-  function startEdit(room) {
-    setEditingRoom(room);
-    setRoomName(room.name);
-    setBuilding(room.building || '');
-    setFloor(room.floor || '');
-    setMachineIds(room.machineIds.join(', '));
-    setShowAddRoom(true);
-  }
-
-  function resetForm() {
-    setRoomName('');
-    setBuilding('');
-    setFloor('');
-    setMachineIds('');
-    setEditingRoom(null);
-    setShowAddRoom(false);
-  }
+  const selectedRoom = rooms.find(room => room._id === selectedRoomId);
 
   if (authLoading || loading) {
     return (
@@ -175,111 +177,69 @@ export default function MyRooms() {
             <h1>My Laundry Rooms</h1>
             <p className="welcome-text">Welcome back, {user.displayName}!</p>
           </div>
-          <button onClick={() => setShowAddRoom(true)} className="add-room-btn">
-            + Add Room
-          </button>
         </div>
 
-        {showAddRoom && (
-          <div className="room-form-container">
-            <h3>{editingRoom ? 'Edit Room' : 'Add New Room'}</h3>
-            <form onSubmit={handleSubmit} className="room-form">
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Room Name *</label>
-                  <input
-                    type="text"
-                    value={roomName}
-                    onChange={(e) => setRoomName(e.target.value)}
-                    placeholder="e.g., Basement Laundry"
-                    required
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Building</label>
-                  <input
-                    type="text"
-                    value={building}
-                    onChange={(e) => setBuilding(e.target.value)}
-                    placeholder="e.g., Building A"
-                  />
-                </div>
-              </div>
+        <RoomSelector
+          rooms={rooms}
+          selectedRoom={selectedRoomId}
+          onRoomChange={setSelectedRoomId}
+        />
 
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Floor</label>
-                  <input
-                    type="text"
-                    value={floor}
-                    onChange={(e) => setFloor(e.target.value)}
-                    placeholder="e.g., 1st Floor"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Machine IDs</label>
-                  <input
-                    type="text"
-                    value={machineIds}
-                    onChange={(e) => setMachineIds(e.target.value)}
-                    placeholder="e.g., a1-m1, a1-m2, a1-m3"
-                  />
-                  <small>Comma-separated list of machine IDs</small>
-                </div>
-              </div>
+        {showRoomForm && (
+          <RoomForm
+            editingRoom={editingRoom}
+            onSave={handleSaveRoom}
+            onCancel={() => {
+              setShowRoomForm(false);
+              setEditingRoom(null);
+            }}
+          />
+        )}
 
-              <div className="form-actions">
-                <button type="button" onClick={resetForm} className="cancel-btn">
-                  Cancel
+        {selectedRoom && !showRoomForm && (
+          <div className="room-card">
+            <div className="room-card-header">
+              <h3>{selectedRoom.name}</h3>
+              <div className="room-actions">
+                <button onClick={() => { setEditingRoom(selectedRoom); setShowRoomForm(true); }} className="edit-btn">
+                  Edit
                 </button>
-                <button type="submit" className="save-btn">
-                  {editingRoom ? 'Update Room' : 'Add Room'}
+                <button onClick={() => handleDelete(selectedRoom._id)} className="delete-btn">
+                  Delete
                 </button>
               </div>
-            </form>
+            </div>
+            {(selectedRoom.building || selectedRoom.floor) && (
+              <p className="room-location">
+                {[selectedRoom.building, selectedRoom.floor].filter(Boolean).join(' • ')}
+              </p>
+            )}
+            {selectedRoom.machineIds && selectedRoom.machineIds.length > 0 && (
+              <div className="machine-ids">
+                <strong>Machines:</strong> {selectedRoom.machineIds.join(', ')}
+              </div>
+            )}
+            <button
+              onClick={() => navigate('/', { state: { filterMachines: selectedRoom.machineIds } })}
+              className="view-machines-btn"
+            >
+              View Machines
+            </button>
           </div>
         )}
 
-        <div className="rooms-grid">
-          {rooms.length === 0 ? (
-            <div className="empty-state">
-              <p>You haven't added any rooms yet.</p>
-              <p>Click "Add Room" to get started!</p>
-            </div>
-          ) : (
-            rooms.map((room) => (
-              <div key={room._id} className="room-card">
-                <div className="room-card-header">
-                  <h3>{room.name}</h3>
-                  <div className="room-actions">
-                    <button onClick={() => startEdit(room)} className="edit-btn">
-                      Edit
-                    </button>
-                    <button onClick={() => handleDelete(room._id)} className="delete-btn">
-                      Delete
-                    </button>
-                  </div>
-                </div>
-                {(room.building || room.floor) && (
-                  <p className="room-location">
-                    {[room.building, room.floor].filter(Boolean).join(' • ')}
-                  </p>
-                )}
-                {room.machineIds && room.machineIds.length > 0 && (
-                  <div className="machine-ids">
-                    <strong>Machines:</strong> {room.machineIds.join(', ')}
-                  </div>
-                )}
-                <button
-                  onClick={() => navigate('/', { state: { filterMachines: room.machineIds } })}
-                  className="view-machines-btn"
-                >
-                  View Machines
-                </button>
-              </div>
-            ))
-          )}
-        </div>
+        {!selectedRoom && !showRoomForm && rooms.length > 0 && (
+          <div className="empty-state">
+            <p>Select a room to view its details, or add a new one.</p>
+          </div>
+        )}
+
+        {rooms.length === 0 && !showRoomForm && (
+          <div className="empty-state">
+            <p>You haven't added any rooms yet.</p>
+            <p>Rooms can only be added from the employer section.</p>
+          </div>
+        )}
       </div>
     </>
   );
