@@ -45,53 +45,6 @@ std::map<String, MachineState> machines;
 // ========== BLE SCANNER ==========
 NimBLEScan* pBLEScan;
 
-// Custom scan callback to handle discovered devices
-class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
-  void onResult(NimBLEAdvertisedDevice* advertisedDevice) {
-    // Check if device has manufacturer data
-    if (advertisedDevice->haveManufacturerData()) {
-      std::string manufData = advertisedDevice->getManufacturerData();
-
-      // Check if this is our laundry machine format (10 bytes, Company ID 0xFFFF)
-      if (manufData.length() == 10 &&
-          (uint8_t)manufData[0] == 0xFF &&
-          (uint8_t)manufData[1] == 0xFF) {
-
-        // Extract MAC address (bytes 2-7)
-        String macAddr = "";
-        for(int i = 2; i < 8; i++) {
-          char hex[3];
-          sprintf(hex, "%02X", (uint8_t)manufData[i]);
-          macAddr += hex;
-          if(i < 7) macAddr += ":";
-        }
-
-        // Extract machine ID character (byte 8)
-        char machineNum = manufData[8];
-
-        // Extract status byte (byte 9)
-        uint8_t status = (uint8_t)manufData[9];
-        bool running = (status & 0x01) != 0;
-        bool empty = (status & 0x02) != 0;
-
-        // Build full machine ID (format: "a1-m1", "a1-m2", etc.)
-        String machineId = "a1-m" + String(machineNum);
-
-        // Update machine state
-        updateMachineState(macAddr, machineId, running, empty);
-
-        // Debug output
-        Serial.printf("[BLE] Device: %s | Machine: %s | Running: %s | Empty: %s | RSSI: %d\n",
-                     macAddr.c_str(),
-                     machineId.c_str(),
-                     running ? "YES" : "NO",
-                     empty ? "YES" : "NO",
-                     advertisedDevice->getRSSI());
-      }
-    }
-  }
-};
-
 // ========== MACHINE STATE MANAGEMENT ==========
 void updateMachineState(String macAddr, String machineId, bool running, bool empty) {
   unsigned long now = millis();
@@ -269,7 +222,6 @@ void setup() {
 
   // Create scanner
   pBLEScan = NimBLEDevice::getScan();
-  pBLEScan->setAdvertisedDeviceCallbacks(new ScanCallbacks());
   pBLEScan->setActiveScan(false); // Passive scanning (lower power)
   pBLEScan->setInterval(100);     // How often to scan (in 0.625ms units)
   pBLEScan->setWindow(99);        // How long to scan (must be <= interval)
@@ -295,12 +247,62 @@ void loop() {
     Serial.printf("\n[SCAN] Starting BLE scan (duration: %ds)...\n", SCAN_DURATION_SEC);
 
     // Scan for devices (blocking call)
-    NimBLEScanResults foundDevices = pBLEScan->start(SCAN_DURATION_SEC, false);
+    NimBLEScanResults* pResults = pBLEScan->start(SCAN_DURATION_SEC, false);
 
-    Serial.printf("[SCAN] Scan complete. Found %d total BLE devices\n", foundDevices.getCount());
+    if (pResults) {
+      int count = pResults->getCount();
+      Serial.printf("[SCAN] Scan complete. Found %d total BLE devices\n", count);
 
-    // Clear results to free memory
-    pBLEScan->clearResults();
+      // Process each discovered device
+      for (int i = 0; i < count; i++) {
+        NimBLEAdvertisedDevice* device = pResults->getDevice(i);
+
+        // Check if device has manufacturer data
+        if (device->haveManufacturerData()) {
+          std::string manufData = device->getManufacturerData();
+
+          // Check if this is our laundry machine format (10 bytes, Company ID 0xFFFF)
+          if (manufData.length() == 10 &&
+              (uint8_t)manufData[0] == 0xFF &&
+              (uint8_t)manufData[1] == 0xFF) {
+
+            // Extract MAC address (bytes 2-7)
+            String macAddr = "";
+            for(int j = 2; j < 8; j++) {
+              char hex[3];
+              sprintf(hex, "%02X", (uint8_t)manufData[j]);
+              macAddr += hex;
+              if(j < 7) macAddr += ":";
+            }
+
+            // Extract machine ID character (byte 8)
+            char machineNum = manufData[8];
+
+            // Extract status byte (byte 9)
+            uint8_t status = (uint8_t)manufData[9];
+            bool running = (status & 0x01) != 0;
+            bool empty = (status & 0x02) != 0;
+
+            // Build full machine ID (format: "a1-m1", "a1-m2", etc.)
+            String machineId = "a1-m" + String(machineNum);
+
+            // Update machine state
+            updateMachineState(macAddr, machineId, running, empty);
+
+            // Debug output
+            Serial.printf("[BLE] Device: %s | Machine: %s | Running: %s | Empty: %s | RSSI: %d\n",
+                         macAddr.c_str(),
+                         machineId.c_str(),
+                         running ? "YES" : "NO",
+                         empty ? "YES" : "NO",
+                         device->getRSSI());
+          }
+        }
+      }
+
+      // Clear results to free memory
+      pBLEScan->clearResults();
+    }
   }
 
   // Check WiFi connection
