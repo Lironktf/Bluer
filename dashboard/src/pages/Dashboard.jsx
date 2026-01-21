@@ -86,7 +86,7 @@ export default function Dashboard() {
         <p className={styles.subtitle}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
             {isRefreshing && <span style={{ fontSize: '12px' }}>🔄</span>}
-            Live ESP32 Data (BLE Gateway)
+            Live Machine Data
             {lastUpdate && (
               <span style={{ fontSize: '12px', opacity: 0.7 }}>
                 • Updated {lastUpdate.toLocaleTimeString()}
@@ -99,13 +99,10 @@ export default function Dashboard() {
       {machines.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
           <h2>No machines connected yet</h2>
-          <p>Waiting for ESP32 devices to send data...</p>
+          <p>Waiting for machines to send data...</p>
           <p style={{ fontSize: '14px', marginTop: '10px' }}>
-            {isRefreshing ? '🔄 Checking for devices...' : 'Auto-refreshing every 5 seconds'}
-          </p>
-          <p style={{ fontSize: '12px', marginTop: '20px' }}>
-            Check browser console (F12) for debug information
-          </p>
+            {isRefreshing ? 'Checking for devices...' : 'Auto-refreshing every 5 seconds'}
+          </p>\
         </div>
       ) : (
         <MachineGrid
