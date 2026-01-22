@@ -222,9 +222,10 @@ void setup() {
 
   // Create scanner
   pBLEScan = NimBLEDevice::getScan();
-  pBLEScan->setActiveScan(false); // Passive scanning (lower power)
-  pBLEScan->setInterval(100);     // How often to scan (in 0.625ms units)
-  pBLEScan->setWindow(99);        // How long to scan (must be <= interval)
+  pBLEScan->setActiveScan(true);  // Active scanning to detect all devices
+  pBLEScan->setInterval(1349);    // Match old router settings (in 0.625ms units)
+  pBLEScan->setWindow(449);       // Match old router settings
+  pBLEScan->setDuplicateFilter(false); // Don't filter duplicates - we want all advertisements
 
   Serial.println("[BLE] Scanner initialized!");
   Serial.println("[BLE] Looking for laundry machines...\n");
@@ -258,9 +259,24 @@ void loop() {
       for (int i = 0; i < count; i++) {
         const NimBLEAdvertisedDevice* device = results.getDevice(i);
 
+        // Debug: Print ALL devices found
+        Serial.printf("[DEBUG] Device %d: Name='%s', Address=%s, RSSI=%d, HasManufData=%d\n",
+                     i,
+                     device->getName().c_str(),
+                     device->getAddress().toString().c_str(),
+                     device->getRSSI(),
+                     device->haveManufacturerData());
+
         // Check if device has manufacturer data
         if (device->haveManufacturerData()) {
           std::string manufData = device->getManufacturerData();
+
+          // Debug: Print manufacturer data length and first few bytes
+          Serial.printf("[DEBUG] ManufData length=%d, bytes: ", manufData.length());
+          for (size_t j = 0; j < manufData.length() && j < 10; j++) {
+            Serial.printf("%02X ", (uint8_t)manufData[j]);
+          }
+          Serial.println();
 
           // Check if this is our laundry machine format (10 bytes, Company ID 0xFFFF)
           if (manufData.length() == 10 &&
