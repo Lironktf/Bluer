@@ -53,24 +53,17 @@ export default async function handler(req, res) {
                           currentMachine.empty !== empty;
 
       // Update or create machine document
-      const machineUpdate = {
-        machineId,
-        running,
-        empty,
-        available: true,
-        lastUpdate: now,
-        updatedAt: now
-      };
-
-      // Add createdAt if it's a new machine
-      if (!currentMachine) {
-        machineUpdate.createdAt = now;
-      }
-
       await machines.updateOne(
         { machineId },
         {
-          $set: machineUpdate,
+          $set: {
+            machineId,
+            running,
+            empty,
+            available: true,
+            lastUpdate: now,
+            updatedAt: now
+          },
           $setOnInsert: { createdAt: now }
         },
         { upsert: true }
