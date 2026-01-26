@@ -1,0 +1,14 @@
+# Render.com configuration
+services:
+  - type: worker
+    name: laundry-mqtt-bridge
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: MQTT_BROKER
+        value: mqtt://test.mosquitto.org:1883
+      - key: API_ENDPOINT
+        value: https://laun-dryer.vercel.app/api/machines
+      - key: MQTT_TOPIC
+        value: laundry/machines/+/status

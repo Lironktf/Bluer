@@ -35,14 +35,14 @@ export default function About() {
             </svg>
           </div>
 
-          <h1>LaunDryer</h1>
+          <h1>Bluer</h1>
           <p className={styles.tagline}>Be more informed</p>
         </section>
 
         {/* What Is This Section */}
         <section className={styles.whatIsThis}>
           <h2>What is this?</h2>
-          <p>Laundryer is a smart sensor that attaches to the back of any washing machine. Using advanced vibration and sound detection, it monitors machine activity in real-time, giving you instant access to laundry room occupancy from your phone or web browser.</p>
+          <p>Bluer is a smart sensor that attaches to the back of any washing machine. Using advanced vibration and sound detection, it monitors machine activity in real-time, giving you instant access to laundry room occupancy from your phone or web browser.</p>
           <p>Perfect for university dorms, apartment buildings, and shared laundry spaces.</p>
         </section>
 
@@ -143,7 +143,7 @@ export default function About() {
 
         {/* Footer */}
         <footer className={styles.footer}>
-          <p>&copy; 2025 Laundryer. Be Informed.</p>
+          <p>&copy; 2025 Bluer. Be Informed.</p>
         </footer>
       </div>
     </div>

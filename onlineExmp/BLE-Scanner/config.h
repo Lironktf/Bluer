@@ -63,8 +63,8 @@
 */
 
 // WiFi credentials - EDIT THESE
-#define WIFI_SSID          "Minsk"
-#define WIFI_PASSWORD      "potolok1"
+#define WIFI_SSID          "WIFINAME"
+#define WIFI_PASSWORD      "PASSWORD"
 
 // MQTT Broker settings
 // Option 1: HiveMQ Cloud (free tier) - requires TLS

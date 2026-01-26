@@ -90,7 +90,7 @@ export default function Dashboard() {
       <Navigation />
 
       <div className={styles.header}>
-        <h1 className={styles.title}>LaunDryer</h1>
+        <h1 className={styles.title}>Bluer</h1>
         <p className={styles.subtitle}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
             {isRefreshing && <span style={{ fontSize: '12px' }}>🔄</span>}
