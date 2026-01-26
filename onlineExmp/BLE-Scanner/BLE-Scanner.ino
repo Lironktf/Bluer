@@ -20,7 +20,7 @@
 #include "wifiHandler.h"
 #include "ntp.h"
 #include "http.h"
-#include "httpApi.h"
+#include "mqtt.h"
 #include "state.h"
 #include "util.h"
 #include "bluetooth.h"
@@ -52,7 +52,7 @@ void setup()
   LogMsg("**********************************************");
   LogMsg("Target devices: %s with manufacturer ID 0x%04X", 
          TARGET_DEVICE_NAME, TARGET_MANUFACTURER_ID);
-  LogMsg("API Endpoint: %s", API_ENDPOINT);
+  LogMsg("MQTT Broker: %s:%d", MQTT_BROKER, MQTT_PORT);
 
 #if UNIT_TEST
   WatchdogUnitTest();
@@ -88,7 +88,7 @@ void setup()
   HttpSetup();
   ScanDevSetup();
   NtpSetup();
-  HttpApiSetup();
+  MqttSetup();
   BluetoothSetup();
   WatchdogSetup(_config.bluetooth.scan_time);
   
@@ -111,7 +111,7 @@ void loop()
     */
     HttpUpdate();
     NtpUpdate();
-    HttpApiUpdate();
+    MqttUpdate();
     BluetoothUpdate();
     ScanDevUpdate();
   }

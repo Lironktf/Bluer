@@ -32,6 +32,7 @@
 #include "bluetooth.h"
 #include "watchdog.h"
 #include "scandev.h"
+#include "mqtt.h"
 
 /*
    the web server object
@@ -147,7 +148,7 @@ void HttpSetup(void)
                     "<p>To change settings, edit the following in <code>config.h</code>:</p>"
                     "<ul style='text-align:left;'>"
                     "<li><b>WiFi:</b> WIFI_SSID, WIFI_PASSWORD</li>"
-                    "<li><b>API:</b> API_ENDPOINT</li>"
+                    "<li><b>MQTT:</b> MQTT_BROKER, MQTT_PORT, MQTT_USER, MQTT_PASSWORD</li>"
                     "<li><b>Scanning:</b> BT_SCAN_TIME, BT_PAUSE_TIME, BT_ABSENCE_CYCLES</li>"
                     "<li><b>Target:</b> TARGET_DEVICE_NAME, TARGET_MANUFACTURER_ID</li>"
                     "</ul>"
@@ -234,17 +235,27 @@ void HttpSetup(void)
                     "<td>" + WifiGetIpAddr() + "</td>"
                     "</tr>"
 
-                    "<tr><th colspan=2>API</th></tr>"
+                    "<tr><th colspan=2>MQTT</th></tr>"
                     "<tr>"
-                    "<td>Endpoint</td>"
-                    "<td>" API_ENDPOINT "</td>"
+                    "<td>Broker</td>"
+                    "<td>" MQTT_BROKER ":" + String(MQTT_PORT) + "</td>"
                     "</tr>"
                     "<tr>"
-                    "<td>Target Device Name</td>"
+                    "<td>Status</td>"
+                    "<td>" + String(MqttGetStatusString()) + "</td>"
+                    "</tr>"
+                    "<tr>"
+                    "<td>Topic Prefix</td>"
+                    "<td>laundry/machines/</td>"
+                    "</tr>"
+
+                    "<tr><th colspan=2>Target Devices</th></tr>"
+                    "<tr>"
+                    "<td>Device Name</td>"
                     "<td>" TARGET_DEVICE_NAME "</td>"
                     "</tr>"
                     "<tr>"
-                    "<td>Target Manufacturer ID</td>"
+                    "<td>Manufacturer ID</td>"
                     "<td>0x" + String(TARGET_MANUFACTURER_ID, HEX) + "</td>"
                     "</tr>"
 
@@ -404,7 +415,8 @@ void HttpSetup(void)
     _WebServer.sendContent(
       _html_header +
       "<p><b>Scanning for:</b> " + String(TARGET_DEVICE_NAME) + " (0x" + String(TARGET_MANUFACTURER_ID, HEX) + ")</p>"
-      "<p><b>API Endpoint:</b> " + String(API_ENDPOINT) + "</p>"
+      "<p><b>MQTT Broker:</b> " + String(MQTT_BROKER) + ":" + String(MQTT_PORT) + 
+      " (" + String(MqttGetStatusString()) + ")</p>"
       "<p><form action='/machines' method='get'><button class='button greenbg'>Refresh</button></form><p>");
 
     ScanDevListHTML(HttpSendHelper);

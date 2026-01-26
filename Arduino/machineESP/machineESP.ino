@@ -51,6 +51,7 @@ float
 
 // Machine identification
 const char* machineId = "a1-m1"; // e.g., "a1-m1", "a2-m5", "b1-m3"
+#define MACHINE_ID_MAX_LEN 16    // Max length for machineId in BLE advertisement
 
 // BLE advertising intervals (in milliseconds)
 const unsigned long advIntervalRunning = 10000; // 10 seconds when running
@@ -63,7 +64,7 @@ unsigned long lastAdvUpdate = 0;
 BLEAdvertising *pAdvertising;
 
 void setup() {
-  Serial.begin(38400);
+  Serial.begin(115200);
   delay(500);
 
   Serial.println("\n\n========================================");
@@ -261,38 +262,28 @@ void record_mpu_accel() {
 
 void updateAdvertisement() {
   // Create manufacturer data packet
-  // Format: Company ID (2 bytes) + MAC address (6 bytes) + Machine ID char (1 byte) + Status (1 byte)
-  uint8_t manufData[10];
+  // Format: Company ID (2 bytes) + Machine ID (16 bytes, null-padded) + Status (1 byte)
+  // Total: 19 bytes
+  const int MANUF_DATA_LEN = 2 + MACHINE_ID_MAX_LEN + 1;
+  uint8_t manufData[MANUF_DATA_LEN];
+  memset(manufData, 0, MANUF_DATA_LEN);
 
   // Company ID (0xFFFF for custom/testing)
   manufData[0] = 0xFF;
   manufData[1] = 0xFF;
 
-  // MAC address (device identification)
-  uint64_t mac = ESP.getEfuseMac();
-  for(int i = 0; i < 6; i++) {
-    manufData[2 + i] = (mac >> (i * 8)) & 0xFF;
-  }
-
-  // Machine ID (extract last character from machineId, e.g., '1' from "a1-m1")
-  const char* idPtr = machineId;
-  char machineChar = '0';
-  while (*idPtr != '\0') {
-    if (*idPtr >= '0' && *idPtr <= '9') {
-      machineChar = *idPtr;
-    }
-    idPtr++;
-  }
-  manufData[8] = (uint8_t)machineChar;
+  // Machine ID (full string, null-padded to MACHINE_ID_MAX_LEN bytes)
+  int idLen = strlen(machineId);
+  if (idLen > MACHINE_ID_MAX_LEN) idLen = MACHINE_ID_MAX_LEN;
+  memcpy(&manufData[2], machineId, idLen);
 
   // Status byte (bit 0: running, bit 1: empty)
-  manufData[9] = (running ? 0x01 : 0x00) | (empty ? 0x02 : 0x00);
+  manufData[2 + MACHINE_ID_MAX_LEN] = (running ? 0x01 : 0x00) | (empty ? 0x02 : 0x00);
 
   // Set manufacturer data in advertisement
   BLEAdvertisementData advData;
-  //advData.setManufacturerData(std::string((char*)manufData, 10));
   String mfg;
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < MANUF_DATA_LEN; i++) {
     mfg += (char)manufData[i];
   }
   advData.setManufacturerData(mfg);

@@ -16,8 +16,8 @@
 #include "../credentials.h"
 
 // ========== CONFIGURATION ==========
-const char* WIFI_SSID = ssid;
-const char* WIFI_PASSWORD = password;
+const char* WIFI_SSID = "Liron's iPhone";
+const char* WIFI_PASSWORD = "0546751512a";
 const char* API_ENDPOINT = "https://laun-dryer.vercel.app/api/machines";
 
 // BLE scan configuration
@@ -42,8 +42,73 @@ struct MachineState {
 // Map to store all discovered machines (key: MAC address)
 std::map<String, MachineState> machines;
 
+// Forward declaration
+void updateMachineState(String macAddr, String machineId, bool running, bool empty);
+
 // ========== BLE SCANNER ==========
 NimBLEScan* pBLEScan;
+
+// Scan results callback class
+class MyScanCallbacks : public NimBLEScanCallbacks {
+  void onResult(NimBLEAdvertisedDevice* advertisedDevice) {
+    // Debug: Print ALL devices found
+    Serial.printf("[BLE] Found device: Name='%s', Address=%s, RSSI=%d\n",
+                 advertisedDevice->getName().c_str(),
+                 advertisedDevice->getAddress().toString().c_str(),
+                 advertisedDevice->getRSSI());
+
+    // Check if device has manufacturer data
+    if (advertisedDevice->haveManufacturerData()) {
+      std::string manufData = advertisedDevice->getManufacturerData();
+
+      // Debug: Print manufacturer data
+      Serial.printf("[BLE]   ManufData length=%d, bytes: ", manufData.length());
+      for (size_t j = 0; j < manufData.length() && j < 10; j++) {
+        Serial.printf("%02X ", (uint8_t)manufData[j]);
+      }
+      Serial.println();
+
+      // Check if this is our laundry machine format (10 bytes, Company ID 0xFFFF)
+      if (manufData.length() == 10 &&
+          (uint8_t)manufData[0] == 0xFF &&
+          (uint8_t)manufData[1] == 0xFF) {
+
+        // Extract MAC address (bytes 2-7)
+        String macAddr = "";
+        for(int j = 2; j < 8; j++) {
+          char hex[3];
+          sprintf(hex, "%02X", (uint8_t)manufData[j]);
+          macAddr += hex;
+          if(j < 7) macAddr += ":";
+        }
+
+        // Extract machine ID character (byte 8)
+        char machineNum = manufData[8];
+
+        // Extract status byte (byte 9)
+        uint8_t status = (uint8_t)manufData[9];
+        bool running = (status & 0x01) != 0;
+        bool empty = (status & 0x02) != 0;
+
+        // Build full machine ID (format: "a1-m1", "a1-m2", etc.)
+        String machineId = "a1-m" + String(machineNum);
+
+        // Update machine state
+        updateMachineState(macAddr, machineId, running, empty);
+
+        // Debug output
+        Serial.printf("[MACHINE] %s | Running: %s | Empty: %s\n",
+                     machineId.c_str(),
+                     running ? "YES" : "NO",
+                     empty ? "YES" : "NO");
+      }
+    }
+  }
+
+  void onScanEnd(NimBLEScanResults results) {
+    Serial.printf("[SCAN] Scan ended. Total devices in results: %d\n", results.getCount());
+  }
+};
 
 // ========== MACHINE STATE MANAGEMENT ==========
 void updateMachineState(String macAddr, String machineId, bool running, bool empty) {
@@ -168,6 +233,25 @@ void processMachineUpdates() {
 // ========== WIFI MANAGEMENT ==========
 void setupWiFi() {
   Serial.println("\n========== WiFi Setup ==========");
+
+  // Scan for available WiFi networks first
+  Serial.println("[WiFi] Scanning for available networks...");
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  delay(100);
+
+  int numNetworks = WiFi.scanNetworks();
+  Serial.printf("[WiFi] Found %d networks:\n", numNetworks);
+  for (int i = 0; i < numNetworks; i++) {
+    Serial.printf("  %d: SSID='%s' | Signal=%d dBm | Channel=%d | Encryption=%s\n",
+                 i + 1,
+                 WiFi.SSID(i).c_str(),
+                 WiFi.RSSI(i),
+                 WiFi.channel(i),
+                 WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "Open" : "Encrypted");
+  }
+  Serial.println();
+
   Serial.printf("Connecting to: %s\n", WIFI_SSID);
 
   // Set WiFi mode
@@ -212,25 +296,63 @@ void setup() {
   Serial.println("   Using NimBLE for Better Performance");
   Serial.println("========================================\n");
 
-  // Initialize WiFi first
-  setupWiFi();
-
-  // Initialize NimBLE
-  Serial.println("\n========== BLE Setup ==========");
+  // Initialize NimBLE FIRST to scan for devices
+  Serial.println("========== BLE Setup ==========");
   Serial.println("[BLE] Initializing NimBLE...");
-  NimBLEDevice::init("LaundryRouter");
+
+  // Configure scan filtering (like BLE-Scanner repo does)
+  NimBLEDevice::setScanFilterMode(CONFIG_BTDM_SCAN_DUPL_TYPE_DEVICE);
+  NimBLEDevice::setScanDuplicateCacheSize(200);
+  Serial.println("[BLE] Scan filter configured");
+
+  // Initialize NimBLE if not already initialized
+  if (!NimBLEDevice::isInitialized()) {
+    NimBLEDevice::init("LaundryRouter");
+    Serial.println("[BLE] NimBLEDevice initialized");
+  } else {
+    Serial.println("[BLE] NimBLEDevice already initialized");
+  }
 
   // Create scanner
   pBLEScan = NimBLEDevice::getScan();
+  if (pBLEScan == nullptr) {
+    Serial.println("[BLE] ERROR: Failed to get scan object!");
+    while(1) { delay(1000); } // Halt
+  }
+  Serial.println("[BLE] Scan object created");
+
+  // Set callbacks (like BLE-Scanner repo does)
+  pBLEScan->setScanCallbacks(new MyScanCallbacks(), false);
+  Serial.println("[BLE] Scan callbacks registered");
+
+  // Configure scanner (using BLE-Scanner repo settings)
+  Serial.println("[BLE] Configuring scanner...");
   pBLEScan->setActiveScan(true);  // Active scanning to detect all devices
-  pBLEScan->setInterval(1349);    // Match old router settings (in 0.625ms units)
-  pBLEScan->setWindow(449);       // Match old router settings
-  pBLEScan->setDuplicateFilter(false); // Don't filter duplicates - we want all advertisements
+  Serial.println("[BLE]   - Active scan: enabled");
 
-  Serial.println("[BLE] Scanner initialized!");
-  Serial.println("[BLE] Looking for laundry machines...\n");
+  pBLEScan->setInterval(3000);    // 3000ms (BLE-Scanner uses this)
+  Serial.println("[BLE]   - Interval: 3000");
 
-  Serial.println("========================================");
+  pBLEScan->setWindow(2999);      // 2999ms (BLE-Scanner uses this)
+  Serial.println("[BLE]   - Window: 2999");
+
+  Serial.println("[BLE] Scanner configured successfully!");
+  Serial.println("[BLE] Performing initial scan to detect all nearby BLE devices...\n");
+
+  // Do an initial 10-second scan to show ALL BLE devices
+  Serial.println("[SCAN] Starting initial 10-second BLE scan...");
+  Serial.println("[SCAN] Callbacks will print devices as they're discovered...\n");
+
+  pBLEScan->start(10, false);
+
+  Serial.println("[SCAN] Initial scan complete!\n");
+
+  Serial.println("========================================\n");
+
+  // Now initialize WiFi
+  setupWiFi();
+
+  Serial.println("\n========================================");
   Serial.println("System ready! Starting main loop...");
   Serial.println("========================================\n");
 }
@@ -246,82 +368,12 @@ void loop() {
     lastScanTime = currentTime;
 
     Serial.printf("\n[SCAN] Starting BLE scan (duration: %ds)...\n", SCAN_DURATION_SEC);
+    Serial.println("[SCAN] Devices will be printed as they're discovered via callback...\n");
 
-    // Scan for devices (blocking call) - returns true on success
-    if (pBLEScan->start(SCAN_DURATION_SEC, false)) {
-      // Get the scan results
-      NimBLEScanResults results = pBLEScan->getResults();
-      int count = results.getCount();
+    // Start scan - callbacks will handle device discovery
+    pBLEScan->start(SCAN_DURATION_SEC, false);
 
-      Serial.printf("[SCAN] Scan complete. Found %d total BLE devices\n", count);
-
-      // Process each discovered device
-      for (int i = 0; i < count; i++) {
-        const NimBLEAdvertisedDevice* device = results.getDevice(i);
-
-        // Debug: Print ALL devices found
-        Serial.printf("[DEBUG] Device %d: Name='%s', Address=%s, RSSI=%d, HasManufData=%d\n",
-                     i,
-                     device->getName().c_str(),
-                     device->getAddress().toString().c_str(),
-                     device->getRSSI(),
-                     device->haveManufacturerData());
-
-        // Check if device has manufacturer data
-        if (device->haveManufacturerData()) {
-          std::string manufData = device->getManufacturerData();
-
-          // Debug: Print manufacturer data length and first few bytes
-          Serial.printf("[DEBUG] ManufData length=%d, bytes: ", manufData.length());
-          for (size_t j = 0; j < manufData.length() && j < 10; j++) {
-            Serial.printf("%02X ", (uint8_t)manufData[j]);
-          }
-          Serial.println();
-
-          // Check if this is our laundry machine format (10 bytes, Company ID 0xFFFF)
-          if (manufData.length() == 10 &&
-              (uint8_t)manufData[0] == 0xFF &&
-              (uint8_t)manufData[1] == 0xFF) {
-
-            // Extract MAC address (bytes 2-7)
-            String macAddr = "";
-            for(int j = 2; j < 8; j++) {
-              char hex[3];
-              sprintf(hex, "%02X", (uint8_t)manufData[j]);
-              macAddr += hex;
-              if(j < 7) macAddr += ":";
-            }
-
-            // Extract machine ID character (byte 8)
-            char machineNum = manufData[8];
-
-            // Extract status byte (byte 9)
-            uint8_t status = (uint8_t)manufData[9];
-            bool running = (status & 0x01) != 0;
-            bool empty = (status & 0x02) != 0;
-
-            // Build full machine ID (format: "a1-m1", "a1-m2", etc.)
-            String machineId = "a1-m" + String(machineNum);
-
-            // Update machine state
-            updateMachineState(macAddr, machineId, running, empty);
-
-            // Debug output
-            Serial.printf("[BLE] Device: %s | Machine: %s | Running: %s | Empty: %s | RSSI: %d\n",
-                         macAddr.c_str(),
-                         machineId.c_str(),
-                         running ? "YES" : "NO",
-                         empty ? "YES" : "NO",
-                         device->getRSSI());
-          }
-        }
-      }
-
-      // Clear results to free memory
-      pBLEScan->clearResults();
-    } else {
-      Serial.println("[SCAN] Scan failed!");
-    }
+    Serial.println("[SCAN] Scan complete!");
   }
 
   // Check WiFi connection

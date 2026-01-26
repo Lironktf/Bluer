@@ -23,10 +23,11 @@
 
 */
 
+#include <Arduino.h>
 #include <stdio.h>
 #include <string.h>
 #include "config.h"
-#include "eepromHandler.h"
+#include "util.h"
 
 CONFIG_T _config;
 
@@ -102,7 +103,7 @@ void ConfigGet(int offset, int size, void *cfg)
 }
 
 /*
-   functions to set the configuration for a subsystem -- will be written to the EEPROM
+   functions to set the configuration for a subsystem (in-memory only, no EEPROM)
 */
 void ConfigSet(int offset, int size, void *cfg)
 {
@@ -115,6 +116,4 @@ void ConfigSet(int offset, int size, void *cfg)
 #if DBG_CFG
   dump("CFG:", cfg, size);
 #endif
-
-  EepromWrite(offset, size, (byte *) &_config + offset);
-}/**/
+}

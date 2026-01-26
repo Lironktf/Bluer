@@ -15,7 +15,7 @@
 #include "config.h"
 #include "state.h"
 #include "bluetooth.h"
-#include "httpApi.h"
+#include "mqtt.h"
 #include "util.h"
 #include "scandev.h"
 
@@ -151,18 +151,18 @@ void ScanDevUpdate(void)
       // Don't post absence - the API will detect offline via lastUpdate timeout
     }
     
-    // Post to API if pending and enough time has passed
+    // Publish to MQTT if pending and enough time has passed
     if (machine->post_pending && machine->present) {
       if (currentTime - machine->last_posted >= MIN_POST_INTERVAL) {
-        LogMsg("SCANDEV: Posting status for %s to API", machine->machineId);
+        LogMsg("SCANDEV: Publishing status for %s to MQTT", machine->machineId);
         
-        if (HttpApiPostMachineStatus(machine->machineId, machine->running, machine->empty)) {
+        if (MqttPublishMachineStatus(machine->machineId, machine->running, machine->empty)) {
           machine->post_pending = false;
           machine->state_changed = false;
           machine->last_posted = currentTime;
-          LogMsg("SCANDEV: Successfully posted status for %s", machine->machineId);
+          LogMsg("SCANDEV: Successfully published status for %s", machine->machineId);
         } else {
-          LogMsg("SCANDEV: Failed to post status for %s - will retry", machine->machineId);
+          LogMsg("SCANDEV: Failed to publish status for %s - will retry", machine->machineId);
         }
       }
     }

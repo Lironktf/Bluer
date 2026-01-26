@@ -47,7 +47,7 @@
 #define DBG_STATE         (DBG && 0)
 #define DBG_UTIL          (DBG && 0)
 #define DBG_WIFI          (DBG && 0)
-#define DBG_HTTP_API      (DBG && 1)
+#define DBG_MQTT          (DBG && 1)
 
 
 /*
@@ -63,11 +63,20 @@
 */
 
 // WiFi credentials - EDIT THESE
-#define WIFI_SSID          "minsk"
-#define WIFI_PASSWORD      "Potolok1"
+#define WIFI_SSID          "Minsk"
+#define WIFI_PASSWORD      "potolok1"
 
-// API endpoint
-#define API_ENDPOINT       "https://laun-dryer.vercel.app/api/machines"
+// MQTT Broker settings
+// Option 1: HiveMQ Cloud (free tier) - requires TLS
+// Option 2: test.mosquitto.org (public broker, no auth, no TLS)
+// Option 3: Your own Mosquitto broker
+
+// === EDIT THESE MQTT SETTINGS ===
+#define MQTT_BROKER        "test.mosquitto.org"  // Change to your broker
+#define MQTT_PORT          1883                   // 1883 for non-TLS, 8883 for TLS
+#define MQTT_USE_AUTH      0                      // Set to 1 if using authentication
+#define MQTT_USER          ""                     // MQTT username (if auth enabled)
+#define MQTT_PASSWORD      ""                     // MQTT password (if auth enabled)
 
 // Device name
 #define DEVICE_NAME        "LaundryScanner"
