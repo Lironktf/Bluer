@@ -62,9 +62,12 @@
    ============================================
 */
 
-// WiFi credentials - EDIT THESE
-#define WIFI_SSID          "WIFINAME"
-#define WIFI_PASSWORD      "PASSWORD"
+// WiFi credentials - Load from credentials.h (not committed to git)
+#if __has_include("credentials.h")
+  #include "credentials.h"
+#else
+  #error "credentials.h not found! Copy credentials.h.example to credentials.h and fill in your WiFi credentials."
+#endif
 
 // MQTT Broker settings
 // Option 1: HiveMQ Cloud (free tier) - requires TLS

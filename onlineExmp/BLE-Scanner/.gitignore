@@ -2,3 +2,4 @@ ble-manufacturer-list.h
 characteristic-appearance.h
 *.swp
 *.bin
+credentials.h
