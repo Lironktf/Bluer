@@ -20,6 +20,7 @@ export default function Dashboard() {
 
   // State for rooms
   const [rooms, setRooms] = useState([]);
+  const [roomsLoading, setRoomsLoading] = useState(true);
 
   // State for last update time
   const [lastUpdate, setLastUpdate] = useState(null);
@@ -75,13 +76,14 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch rooms for search
+  // Fetch rooms for search - need ALL available rooms (public rooms)
   useEffect(() => {
     const fetchRooms = async () => {
+      setRoomsLoading(true);
       try {
         const token = Cookies.get('auth_token');
         if (token) {
-          // Try to fetch user's rooms
+          // Fetch all available rooms (user's rooms + public rooms)
           const response = await fetch(`${BACKEND_URL}/api/rooms`, {
             headers: {
               'Authorization': `Bearer ${token}`
@@ -89,11 +91,28 @@ export default function Dashboard() {
           });
           if (response.ok) {
             const data = await response.json();
-            setRooms(data.rooms || []);
+            // Combine user rooms and available rooms for search
+            const allRooms = [
+              ...(data.userRooms || []),
+              ...(data.availableRooms || [])
+            ];
+            // Remove duplicates
+            const uniqueRooms = Array.from(
+              new Map(allRooms.map(room => [room._id.toString(), room])).values()
+            );
+            setRooms(uniqueRooms);
+            console.log('📦 Loaded', uniqueRooms.length, 'rooms for search');
+          } else {
+            console.error('❌ Failed to fetch rooms:', response.status);
           }
+        } else {
+          // If not logged in, we can't fetch rooms
+          console.log('⚠️ Not logged in - room search unavailable');
         }
       } catch (error) {
         console.error('❌ Error fetching rooms:', error);
+      } finally {
+        setRoomsLoading(false);
       }
     };
 
@@ -131,20 +150,23 @@ export default function Dashboard() {
     }
   }, [searchTerm, location.pathname, navigate]);
 
-  // Filter machines based on room search
+  // Filter machines based on room search (same logic as RoomSelector)
   let machines = allMachines;
-  if (searchTerm) {
-    // Find rooms that match the search term (exact match or partial)
+  if (searchTerm && rooms.length > 0) {
     const searchLower = searchTerm.toLowerCase();
-    const matchingRooms = rooms.filter(room =>
-      room.name.toLowerCase().includes(searchLower) ||
-      room.name.toLowerCase() === searchLower ||
-      (room.building && room.building.toLowerCase().includes(searchLower)) ||
-      (room.floor && room.floor.toLowerCase().includes(searchLower))
-    );
+    
+    // Find rooms that match the search term (same filtering as RoomSelector)
+    const matchingRooms = rooms.filter(room => {
+      return (
+        room.name.toLowerCase().includes(searchLower) ||
+        (room.building && room.building.toLowerCase().includes(searchLower)) ||
+        (room.floor && room.floor.toLowerCase().includes(searchLower))
+      );
+    });
 
     console.log('🔍 Search term:', searchTerm);
-    console.log('🏠 Matching rooms:', matchingRooms.map(r => r.name));
+    console.log('📦 Total rooms available:', rooms.length);
+    console.log('🏠 Matching rooms:', matchingRooms.map(r => ({ name: r.name, machineIds: r.machineIds })));
 
     // Get machine IDs from matching rooms
     const matchingMachineIds = new Set();
@@ -155,14 +177,21 @@ export default function Dashboard() {
     });
 
     console.log('🔧 Matching machine IDs:', Array.from(matchingMachineIds));
+    console.log('🔧 Total machines available:', allMachines.length);
 
     // Filter machines that belong to matching rooms
     if (matchingMachineIds.size > 0) {
       machines = allMachines.filter(machine => matchingMachineIds.has(machine.id));
+      console.log('✅ Filtered to', machines.length, 'machines');
     } else {
       // No matching rooms found
       machines = [];
+      console.log('❌ No machines found for matching rooms');
     }
+  } else if (searchTerm && rooms.length === 0) {
+    // Search term but no rooms loaded yet
+    console.log('⚠️ Search term entered but rooms not loaded yet');
+    machines = []; // Show "no results" while loading
   }
 
   console.log('🔧 Displaying machines:', machines);
@@ -194,26 +223,25 @@ export default function Dashboard() {
         </p>
       </div>
 
-      {allMachines.length > 0 && (
-        <div className={styles.searchContainer}>
-          <input
-            type="text"
-            className={styles.searchInput}
-            placeholder="Search rooms by name, building, or floor..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-          {searchTerm && (
-            <button
-              className={styles.clearButton}
-              onClick={() => setSearchTerm('')}
-              aria-label="Clear search"
-            >
-              ×
-            </button>
-          )}
-        </div>
-      )}
+      <div className={styles.searchContainer}>
+        <input
+          type="text"
+          className={styles.searchInput}
+          placeholder={roomsLoading ? "Loading rooms..." : "Search rooms by name, building, or floor..."}
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          disabled={roomsLoading}
+        />
+        {searchTerm && (
+          <button
+            className={styles.clearButton}
+            onClick={() => setSearchTerm('')}
+            aria-label="Clear search"
+          >
+            ×
+          </button>
+        )}
+      </div>
 
       {allMachines.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
@@ -225,8 +253,19 @@ export default function Dashboard() {
         </div>
       ) : machines.length === 0 && searchTerm ? (
         <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
-          <h2>No rooms found</h2>
-          <p>No rooms match "{searchTerm}"</p>
+          <h2>No machines found</h2>
+          {roomsLoading ? (
+            <p>Loading rooms...</p>
+          ) : rooms.length === 0 ? (
+            <p>No rooms available. Please log in to search rooms.</p>
+          ) : (
+            <>
+              <p>No machines found for rooms matching "{searchTerm}"</p>
+              <p style={{ fontSize: '0.9rem', marginTop: '0.5rem', color: '#999' }}>
+                Found {rooms.length} room{rooms.length !== 1 ? 's' : ''} total
+              </p>
+            </>
+          )}
           <button
             onClick={() => setSearchTerm('')}
             style={{
