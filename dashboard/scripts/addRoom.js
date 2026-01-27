@@ -49,8 +49,7 @@ async function addRoom() {
       await client.close();
       return;
     }
-
-    // Insert room
+    
     const result = await rooms.insertOne(roomData);
     console.log(`✅ Room "${roomData.name}" created successfully!`);
     console.log('   Room ID:', result.insertedId);
