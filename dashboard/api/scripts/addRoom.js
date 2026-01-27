@@ -31,7 +31,7 @@ async function addRoom() {
 
     // Room data
     const roomData = {
-      name: 'STJ-Sieg/Ryan',
+      name: 'SJU-Sieg/Ryan',
       building: 'Sieg/Ryan',
       floor: 'bruuhhhh',
       machineIds: [], // Add machine IDs here if needed
