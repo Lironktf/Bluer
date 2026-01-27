@@ -77,38 +77,35 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch rooms for search - need ALL available rooms (public rooms)
+  // Fetch rooms for search - always use public rooms (no auth required)
   useEffect(() => {
     const fetchRooms = async () => {
       setRoomsLoading(true);
       try {
-        const token = Cookies.get('auth_token');
-        if (token) {
-          // Fetch all available rooms (user's rooms + public rooms)
-          const response = await fetch(`${BACKEND_URL}/api/rooms`, {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          });
-          if (response.ok) {
-            const data = await response.json();
-            // Combine user rooms and available rooms for search
-            const allRooms = [
-              ...(data.userRooms || []),
-              ...(data.availableRooms || [])
-            ];
-            // Remove duplicates
-            const uniqueRooms = Array.from(
-              new Map(allRooms.map(room => [room._id.toString(), room])).values()
-            );
-            setRooms(uniqueRooms);
-            console.log('📦 Loaded', uniqueRooms.length, 'rooms for search');
+        // Always use publicRooms endpoint so search works logged in or out
+        let uniqueRooms = [];
+        try {
+          const publicResp = await fetch(`${BACKEND_URL}/api/publicRooms`);
+          if (publicResp.ok) {
+            const data = await publicResp.json();
+            uniqueRooms = data.rooms || [];
+            console.log('📦 Loaded', uniqueRooms.length, 'public rooms for search');
           } else {
-            console.error('❌ Failed to fetch rooms:', response.status);
+            console.error('❌ /api/publicRooms failed with status', publicResp.status);
           }
-        } else {
-          // If not logged in, we can't fetch rooms
-          console.log('⚠️ Not logged in - room search unavailable');
+        } catch (error) {
+          console.error('❌ Error fetching /api/publicRooms:', error);
+        }
+
+        setRooms(uniqueRooms);
+
+        // Preload first room if no search term is set and no URL param
+        const urlParams = new URLSearchParams(location.search);
+        const urlRoom = urlParams.get('room');
+        if (uniqueRooms.length > 0 && !searchTerm && !urlRoom && !location.state?.roomName) {
+          const firstRoom = uniqueRooms[0];
+          console.log('🏠 Preloading first room:', firstRoom.name);
+          setSearchTerm(firstRoom.name);
         }
       } catch (error) {
         console.error('❌ Error fetching rooms:', error);

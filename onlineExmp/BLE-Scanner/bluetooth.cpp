@@ -67,7 +67,8 @@ class BLEScannerScanCallbacks : public NimBLEScanCallbacks
       std::string manufData = advertisedDevice->getManufacturerData();
       
       // Need at least: 2 (company ID) + 1 (machineId) + 1 (status) = 4 bytes minimum
-      // Expected: 2 + MACHINE_ID_MAX_LEN + 1 = 19 bytes
+      // Old format: 2 + MACHINE_ID_MAX_LEN + 1 = 19 bytes
+      // New format: 2 + MACHINE_ID_MAX_LEN + ROOM_NAME_MAX_LEN + 1 = 51 bytes
       if (manufData.length() < 4) {
 #if DBG_BT
         DbgMsg("BLE: Skipping - manufacturer data too short (%d bytes)", manufData.length());
@@ -85,15 +86,34 @@ class BLEScannerScanCallbacks : public NimBLEScanCallbacks
         return;
       }
 
+      // Determine format: old (19 bytes) or new (51 bytes with room)
+      bool hasRoom = (manufData.length() >= (2 + MACHINE_ID_MAX_LEN + ROOM_NAME_MAX_LEN + 1));
+      
       // Parse machine ID (starts at byte 2, up to MACHINE_ID_MAX_LEN bytes, null-terminated)
       char machineId[MACHINE_ID_MAX_LEN + 1];
       memset(machineId, 0, sizeof(machineId));
       
-      int idLen = manufData.length() - 3; // -2 for company ID, -1 for status byte
-      if (idLen > MACHINE_ID_MAX_LEN) idLen = MACHINE_ID_MAX_LEN;
+      int idLen = MACHINE_ID_MAX_LEN;
+      if (!hasRoom) {
+        // Old format: machineId length is variable
+        idLen = manufData.length() - 3; // -2 for company ID, -1 for status byte
+        if (idLen > MACHINE_ID_MAX_LEN) idLen = MACHINE_ID_MAX_LEN;
+      }
       
       for (int i = 0; i < idLen && manufData[2 + i] != '\0'; i++) {
         machineId[i] = manufData[2 + i];
+      }
+
+      // Parse room name (if present, starts after machineId)
+      char roomName[ROOM_NAME_MAX_LEN + 1] = "";
+      if (hasRoom) {
+        memset(roomName, 0, sizeof(roomName));
+        int roomOffset = 2 + MACHINE_ID_MAX_LEN;
+        int roomLen = ROOM_NAME_MAX_LEN;
+        
+        for (int i = 0; i < roomLen && (roomOffset + i) < (int)manufData.length() - 1 && manufData[roomOffset + i] != '\0'; i++) {
+          roomName[i] = manufData[roomOffset + i];
+        }
       }
 
       // Parse status byte (last byte)
@@ -101,8 +121,9 @@ class BLEScannerScanCallbacks : public NimBLEScanCallbacks
       bool running = (statusByte & 0x01) != 0;
       bool empty = (statusByte & 0x02) != 0;
 
-      LogMsg("BLE: Found LaundryMachine! ID: %s, Running: %s, Empty: %s, RSSI: %d",
+      LogMsg("BLE: Found LaundryMachine! ID: %s, Room: %s, Running: %s, Empty: %s, RSSI: %d",
              machineId,
+             hasRoom ? roomName : "(not specified)",
              running ? "YES" : "NO",
              empty ? "YES" : "NO",
              advertisedDevice->getRSSI());
@@ -110,6 +131,7 @@ class BLEScannerScanCallbacks : public NimBLEScanCallbacks
       // Add to device list for tracking and API posting
       ScanDevAddMachine(advertisedDevice->getAddress(),
                         machineId,
+                        hasRoom ? roomName : NULL,
                         running,
                         empty,
                         advertisedDevice->getRSSI());

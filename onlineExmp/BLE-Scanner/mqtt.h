@@ -31,7 +31,7 @@ void MqttUpdate(void);
    Publish machine status to MQTT broker
    Returns true if successful
 */
-bool MqttPublishMachineStatus(const char* machineId, bool running, bool empty);
+bool MqttPublishMachineStatus(const char* machineId, const char* roomName, bool running, bool empty);
 
 /*
    Check if MQTT is connected

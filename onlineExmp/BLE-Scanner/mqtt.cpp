@@ -126,7 +126,7 @@ void MqttUpdate(void)
 /*
    Publish machine status to MQTT broker
 */
-bool MqttPublishMachineStatus(const char* machineId, bool running, bool empty)
+bool MqttPublishMachineStatus(const char* machineId, const char* roomName, bool running, bool empty)
 {
   if (!_mqttClient.connected()) {
     LogMsg("MQTT: Not connected, cannot publish");
@@ -142,6 +142,10 @@ bool MqttPublishMachineStatus(const char* machineId, bool running, bool empty)
   String payload = "{";
   payload += "\"machineId\":\"";
   payload += machineId;
+  if (roomName && strlen(roomName) > 0) {
+    payload += "\",\"room\":\"";
+    payload += roomName;
+  }
   payload += "\",\"running\":";
   payload += running ? "true" : "false";
   payload += ",\"empty\":";

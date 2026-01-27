@@ -93,6 +93,7 @@
 #define TARGET_DEVICE_NAME    "LaundryMachine"
 #define TARGET_MANUFACTURER_ID 0xFFFF
 #define MACHINE_ID_MAX_LEN    16
+#define ROOM_NAME_MAX_LEN     32
 
 /*
    sub-systems config structs (simplified)

@@ -72,7 +72,7 @@ static SCANDEV_MACHINE_T* findEmptySlot()
    Add or update a laundry machine
 */
 bool ScanDevAddMachine(const BLEAddress addr, const char* machineId, 
-                       bool running, bool empty, int rssi)
+                       const char* roomName, bool running, bool empty, int rssi)
 {
   SCANDEV_MACHINE_T* machine = findMachineById(machineId);
   
@@ -89,11 +89,15 @@ bool ScanDevAddMachine(const BLEAddress addr, const char* machineId,
     machine->in_use = true;
     machine->addr = addr;
     strncpy(machine->machineId, machineId, MACHINE_ID_MAX_LEN);
+    if (roomName && strlen(roomName) > 0) {
+      strncpy(machine->roomName, roomName, ROOM_NAME_MAX_LEN);
+    }
     machine->prev_running = !running; // Force initial post
     machine->prev_empty = !empty;
     _machine_count++;
     
-    LogMsg("SCANDEV: New machine added: %s (total: %d)", machineId, _machine_count);
+    LogMsg("SCANDEV: New machine added: %s (Room: %s, total: %d)", 
+           machineId, roomName && strlen(roomName) > 0 ? roomName : "none", _machine_count);
   }
   
   // Check if state changed
@@ -106,6 +110,11 @@ bool ScanDevAddMachine(const BLEAddress addr, const char* machineId,
   machine->rssi = rssi;
   machine->last_seen = now();
   machine->present = true;
+  
+  // Update room name if provided
+  if (roomName && strlen(roomName) > 0) {
+    strncpy(machine->roomName, roomName, ROOM_NAME_MAX_LEN);
+  }
   
   // Mark for posting if state changed
   if (stateChanged) {
@@ -156,7 +165,7 @@ void ScanDevUpdate(void)
       if (currentTime - machine->last_posted >= MIN_POST_INTERVAL) {
         LogMsg("SCANDEV: Publishing status for %s to MQTT", machine->machineId);
         
-        if (MqttPublishMachineStatus(machine->machineId, machine->running, machine->empty)) {
+        if (MqttPublishMachineStatus(machine->machineId, machine->roomName, machine->running, machine->empty)) {
           machine->post_pending = false;
           machine->state_changed = false;
           machine->last_posted = currentTime;

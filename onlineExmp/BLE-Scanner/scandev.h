@@ -30,6 +30,7 @@ typedef struct _scandev_machine {
   // Identification
   BLEAddress addr;
   char machineId[MACHINE_ID_MAX_LEN + 1];
+  char roomName[ROOM_NAME_MAX_LEN + 1]; // Room this machine belongs to
   
   // Current state
   bool running;
@@ -57,7 +58,7 @@ typedef struct _scandev_machine {
    Add or update a laundry machine in the list
 */
 bool ScanDevAddMachine(const BLEAddress addr, const char* machineId, 
-                       bool running, bool empty, int rssi);
+                       const char* roomName, bool running, bool empty, int rssi);
 
 /*
    Return the machine list as HTML for web interface

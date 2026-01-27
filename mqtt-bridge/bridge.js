@@ -49,12 +49,17 @@ let errorCount = 0;
 /**
  * Post machine status to Vercel API
  */
-async function postToApi(machineId, running, empty) {
+async function postToApi(machineId, room, running, empty) {
   const payload = {
     machineId,
     running,
     empty,
   };
+  
+  // Add room if provided
+  if (room && room.trim() !== '') {
+    payload.room = room;
+  }
 
   console.log(`[API] Posting: ${JSON.stringify(payload)}`);
 
@@ -115,9 +120,10 @@ async function handleMessage(topic, message) {
 
     const running = Boolean(payload.running);
     const empty = Boolean(payload.empty);
+    const room = payload.room || null; // Room name from BLE advertisement
 
     // Forward to Vercel API
-    await postToApi(machineId, running, empty);
+    await postToApi(machineId, room, running, empty);
     
   } catch (error) {
     console.error(`[MQTT] Failed to parse message: ${error.message}`);

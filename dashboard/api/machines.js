@@ -30,7 +30,7 @@ export default async function handler(req, res) {
   try {
     // Handle POST - ESP32 sending status update
     if (req.method === 'POST') {
-      const { machineId, running, empty } = req.body;
+      const { machineId, room, running, empty } = req.body;
 
       // Validate required fields
       if (!machineId || typeof running !== 'boolean' || typeof empty !== 'boolean') {
@@ -53,17 +53,24 @@ export default async function handler(req, res) {
                           currentMachine.empty !== empty;
 
       // Update or create machine document
+      const updateData = {
+        machineId,
+        running,
+        empty,
+        available: true,
+        lastUpdate: now,
+        updatedAt: now
+      };
+      
+      // Add room if provided
+      if (room && typeof room === 'string' && room.trim() !== '') {
+        updateData.room = room.trim();
+      }
+      
       await machines.updateOne(
         { machineId },
         {
-          $set: {
-            machineId,
-            running,
-            empty,
-            available: true,
-            lastUpdate: now,
-            updatedAt: now
-          },
+          $set: updateData,
           $setOnInsert: { createdAt: now }
         },
         { upsert: true }
@@ -137,6 +144,7 @@ export default async function handler(req, res) {
           running: machine.running,
           empty: machine.empty,
           available: isAvailable,
+          room: machine.room || null, // Room name from machine
           lastUpdate: machine.lastUpdate,
           timeSinceUpdate: timeSinceUpdate
         };

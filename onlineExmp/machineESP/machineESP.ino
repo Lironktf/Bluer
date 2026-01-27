@@ -51,7 +51,9 @@ float
 
 // Machine identification
 const char* machineId = "a1-m1"; // e.g., "a1-m1", "a2-m5", "b1-m3"
+const char* roomName = "STJ-Sieg/Ryan"; // Room this machine belongs to
 #define MACHINE_ID_MAX_LEN 16    // Max length for machineId in BLE advertisement
+#define ROOM_NAME_MAX_LEN 32     // Max length for room name in BLE advertisement
 
 // BLE advertising intervals (in milliseconds)
 const unsigned long advIntervalRunning = 10000; // 10 seconds when running
@@ -262,9 +264,9 @@ void record_mpu_accel() {
 
 void updateAdvertisement() {
   // Create manufacturer data packet
-  // Format: Company ID (2 bytes) + Machine ID (16 bytes, null-padded) + Status (1 byte)
-  // Total: 19 bytes
-  const int MANUF_DATA_LEN = 2 + MACHINE_ID_MAX_LEN + 1;
+  // Format: Company ID (2 bytes) + Machine ID (16 bytes, null-padded) + Room Name (32 bytes, null-padded) + Status (1 byte)
+  // Total: 51 bytes
+  const int MANUF_DATA_LEN = 2 + MACHINE_ID_MAX_LEN + ROOM_NAME_MAX_LEN + 1;
   uint8_t manufData[MANUF_DATA_LEN];
   memset(manufData, 0, MANUF_DATA_LEN);
 
@@ -277,8 +279,13 @@ void updateAdvertisement() {
   if (idLen > MACHINE_ID_MAX_LEN) idLen = MACHINE_ID_MAX_LEN;
   memcpy(&manufData[2], machineId, idLen);
 
+  // Room Name (full string, null-padded to ROOM_NAME_MAX_LEN bytes)
+  int roomLen = strlen(roomName);
+  if (roomLen > ROOM_NAME_MAX_LEN) roomLen = ROOM_NAME_MAX_LEN;
+  memcpy(&manufData[2 + MACHINE_ID_MAX_LEN], roomName, roomLen);
+
   // Status byte (bit 0: running, bit 1: empty)
-  manufData[2 + MACHINE_ID_MAX_LEN] = (running ? 0x01 : 0x00) | (empty ? 0x02 : 0x00);
+  manufData[2 + MACHINE_ID_MAX_LEN + ROOM_NAME_MAX_LEN] = (running ? 0x01 : 0x00) | (empty ? 0x02 : 0x00);
 
   // Set manufacturer data in advertisement
   BLEAdvertisementData advData;
@@ -289,8 +296,9 @@ void updateAdvertisement() {
   advData.setManufacturerData(mfg);
   pAdvertising->setAdvertisementData(advData);
 
-  Serial.printf("[BLE] Advertisement updated - Machine: %s | Running: %s | Empty: %s\n",
+  Serial.printf("[BLE] Advertisement updated - Machine: %s | Room: %s | Running: %s | Empty: %s\n",
                machineId,
+               roomName,
                running ? "YES" : "NO",
                empty ? "YES" : "NO");
 }
