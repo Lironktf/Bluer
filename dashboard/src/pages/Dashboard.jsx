@@ -221,7 +221,12 @@ export default function Dashboard() {
         />
       </div>
 
-      {allMachines.length === 0 ? (
+      {!searchTerm ? (
+        <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
+          <h2>Choose a Room!</h2>
+          <p>Use the search box above to select a laundry room.</p>
+        </div>
+      ) : allMachines.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
           <h2>No machines connected yet</h2>
           <p>Waiting for machines to send data...</p>
@@ -229,7 +234,7 @@ export default function Dashboard() {
             {isRefreshing ? 'Checking for devices...' : 'Auto-refreshing every 5 seconds'}
           </p>
         </div>
-      ) : machines.length === 0 && searchTerm ? (
+      ) : machines.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
           <h2>No machines found</h2>
           {roomsLoading ? (
