@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Script to add a room to the database
- * Usage: node api/scripts/addRoom.js
+ * Usage: node scripts/addRoom.js
  */
 
 import { MongoClient } from 'mongodb';
@@ -11,7 +11,7 @@ import { dirname, join } from 'path';
 
 // Load environment variables
 const __dirname = dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: join(__dirname, '../../.env') });
+dotenv.config({ path: join(__dirname, '../.env') });
 
 const MONGODB_URI = process.env.MONGODB_URI;
 const MONGODB_DB = process.env.MONGODB_DB || 'laundry';
@@ -68,3 +68,4 @@ addRoom().catch(error => {
   console.error('❌ Fatal error:', error);
   process.exit(1);
 });
+

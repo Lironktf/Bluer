@@ -5,7 +5,7 @@
  * Creates optimal indexes for the laundry machine database
  * Run this script once after setting up your MongoDB database
  *
- * Usage: node api/scripts/setupIndexes.js
+ * Usage: node scripts/setupIndexes.js
  */
 
 import { MongoClient } from 'mongodb';
@@ -15,7 +15,7 @@ import { dirname, join } from 'path';
 
 // Load environment variables
 const __dirname = dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: join(__dirname, '../../.env') });
+dotenv.config({ path: join(__dirname, '../.env') });
 
 const MONGODB_URI = process.env.MONGODB_URI;
 const MONGODB_DB = process.env.MONGODB_DB || 'laundry';
@@ -136,3 +136,4 @@ setupIndexes().catch(error => {
   console.error('❌ Fatal error:', error);
   process.exit(1);
 });
+
