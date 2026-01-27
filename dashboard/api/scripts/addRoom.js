@@ -31,8 +31,8 @@ async function addRoom() {
 
     // Room data
     const roomData = {
-      name: 'STJ',
-      building: '',
+      name: 'STJ-Sieg/Ryan',
+      building: 'Sieg/Ryan',
       floor: '',
       machineIds: [], // Add machine IDs here if needed
       isPublic: true, // Public room, not tied to a specific user
@@ -41,10 +41,10 @@ async function addRoom() {
       updatedAt: new Date()
     };
 
-    // Check if room already exists
-    const existing = await rooms.findOne({ name: 'STJ' });
+    // Check if room already exists (use the same name as in roomData)
+    const existing = await rooms.findOne({ name: roomData.name });
     if (existing) {
-      console.log('⚠️  Room "STJ" already exists');
+      console.log(`⚠️  Room "${roomData.name}" already exists`);
       console.log('   Room ID:', existing._id);
       await client.close();
       return;
@@ -52,7 +52,7 @@ async function addRoom() {
 
     // Insert room
     const result = await rooms.insertOne(roomData);
-    console.log('✅ Room "STJ" created successfully!');
+    console.log(`✅ Room "${roomData.name}" created successfully!`);
     console.log('   Room ID:', result.insertedId);
 
   } catch (error) {

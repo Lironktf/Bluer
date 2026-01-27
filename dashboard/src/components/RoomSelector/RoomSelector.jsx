@@ -6,13 +6,27 @@ export default function RoomSelector({ rooms, selectedRoom, onRoomChange }) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef(null);
 
+  // Debug: Log rooms when they change
+  useEffect(() => {
+    console.log('🔍 RoomSelector: Received', rooms?.length || 0, 'rooms');
+    if (rooms && rooms.length > 0) {
+      console.log('Rooms:', rooms.map(r => ({ name: r.name, id: r._id })));
+    }
+  }, [rooms]);
+
   // Get the selected room name
   const selectedRoomName = rooms.find(room => room._id === selectedRoom)?.name || '';
 
-  // Filter rooms based on search term
-  const filteredRooms = rooms.filter(room =>
-    room.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Filter rooms based on search term (search name, building, and floor)
+  const filteredRooms = rooms.filter(room => {
+    if (!searchTerm) return true; // Show all rooms when search is empty
+    const searchLower = searchTerm.toLowerCase();
+    return (
+      room.name.toLowerCase().includes(searchLower) ||
+      (room.building && room.building.toLowerCase().includes(searchLower)) ||
+      (room.floor && room.floor.toLowerCase().includes(searchLower))
+    );
+  });
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -48,20 +62,28 @@ export default function RoomSelector({ rooms, selectedRoom, onRoomChange }) {
         />
         {isOpen && (
           <ul className={styles.dropdown}>
-            {filteredRooms.map((room) => (
-              <li
-                key={room._id}
-                className={`${styles.option} ${room._id === selectedRoom ? styles.selected : ''}`}
-                onClick={() => handleSelect(room._id)}
-              >
-                {room.name}
-              </li>
-            ))}
-          </ul>
-        )}
-        {isOpen && filteredRooms.length === 0 && searchTerm && (
-          <ul className={styles.dropdown}>
-            <li className={styles.noResults}>No rooms found</li>
+            {filteredRooms.length > 0 ? (
+              filteredRooms.map((room) => (
+                <li
+                  key={room._id}
+                  className={`${styles.option} ${room._id === selectedRoom ? styles.selected : ''}`}
+                  onClick={() => handleSelect(room._id)}
+                >
+                  <div>
+                    <strong>{room.name}</strong>
+                    {(room.building || room.floor) && (
+                      <span style={{ fontSize: '0.85rem', color: '#666', marginLeft: '0.5rem' }}>
+                        {[room.building, room.floor].filter(Boolean).join(' • ')}
+                      </span>
+                    )}
+                  </div>
+                </li>
+              ))
+            ) : searchTerm ? (
+              <li className={styles.noResults}>No rooms found matching "{searchTerm}"</li>
+            ) : (
+              <li className={styles.noResults}>No rooms available</li>
+            )}
           </ul>
         )}
       </div>

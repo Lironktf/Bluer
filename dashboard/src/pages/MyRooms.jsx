@@ -15,6 +15,7 @@ export default function MyRooms() {
   const navigate = useNavigate();
 
   const [rooms, setRooms] = useState([]);
+  const [allAvailableRooms, setAllAvailableRooms] = useState([]); // All rooms for search
   const [loading, setLoading] = useState(true);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [selectedRoomId, setSelectedRoomId] = useState(null);
@@ -33,9 +34,13 @@ export default function MyRooms() {
 
   async function fetchRooms() {
     const token = Cookies.get('auth_token');
-    if (!token) return;
+    if (!token) {
+      setLoading(false);
+      return;
+    }
 
     try {
+      // Fetch user's rooms + all public rooms
       const response = await fetch(`${API_BASE_URL}/api/rooms`, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -44,7 +49,14 @@ export default function MyRooms() {
 
       if (response.ok) {
         const data = await response.json();
-        setRooms(data.rooms);
+        const allRooms = data.rooms || [];
+        console.log('📦 Fetched rooms:', allRooms.length, 'rooms');
+        setRooms(allRooms);
+        setAllAvailableRooms(allRooms); // All available rooms for search
+      } else {
+        console.error('❌ Failed to fetch rooms:', response.status, response.statusText);
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Error details:', errorData);
       }
     } catch (error) {
       console.error('Failed to fetch rooms:', error);
@@ -142,7 +154,7 @@ export default function MyRooms() {
         </div>
 
         <RoomSelector
-          rooms={rooms}
+          rooms={allAvailableRooms}
           selectedRoom={selectedRoomId}
           onRoomChange={setSelectedRoomId}
         />
@@ -198,8 +210,7 @@ export default function MyRooms() {
 
         {rooms.length === 0 && !showRoomForm && (
           <div className="empty-state">
-            <p>You have no rooms assigned to you.</p>
-            <p>Contact your administrator to get access to rooms.</p>
+            <p>Add rooms by searching from them!</p>
           </div>
         )}
       </div>

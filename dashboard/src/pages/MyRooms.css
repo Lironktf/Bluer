@@ -2,6 +2,13 @@
   max-width: 1200px;
   margin: 0 auto;
   padding: 2rem;
+  padding-top: 6rem; /* Add top padding to avoid hamburger menu overlap on mobile */
+}
+
+@media (min-width: 768px) {
+  .my-rooms-page {
+    padding-top: 2rem; /* Less padding on desktop */
+  }
 }
 
 .my-rooms-header {
@@ -9,6 +16,13 @@
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 2rem;
+  margin-left: 0; /* Reset any inherited margin */
+}
+
+@media (max-width: 768px) {
+  .my-rooms-header {
+    margin-left: 4.5rem; /* Push header right to avoid hamburger menu (menu is ~3.5rem wide + 1rem gap) */
+  }
 }
 
 .my-rooms-header h1 {
@@ -289,11 +303,13 @@
 @media (max-width: 768px) {
   .my-rooms-page {
     padding: 1rem;
+    padding-top: 6rem; /* Keep top padding on mobile */
   }
 
   .my-rooms-header {
     flex-direction: column;
     gap: 1rem;
+    margin-left: 4.5rem; /* Push header right to avoid hamburger menu */
   }
 
   .add-room-btn {

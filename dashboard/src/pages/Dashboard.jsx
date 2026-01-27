@@ -3,6 +3,7 @@ import { useLocalStorage } from '../hooks/useLocalStorage';
 import Navigation from '../components/Navigation/Navigation';
 import MachineGrid from '../components/MachineGrid/MachineGrid';
 import styles from './Dashboard.module.css';
+import Cookies from 'js-cookie';
 
 const BACKEND_URL = 'https://laun-dryer.vercel.app';
 
@@ -13,13 +14,16 @@ export default function Dashboard() {
   // State for machine statuses from backend
   const [machineStatuses, setMachineStatuses] = useState({});
 
+  // State for rooms
+  const [rooms, setRooms] = useState([]);
+
   // State for last update time
   const [lastUpdate, setLastUpdate] = useState(null);
 
   // State for loading indicator
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // State for search/filter
+  // State for search/filter (now searches rooms)
   const [searchTerm, setSearchTerm] = useState('');
 
   // Fetch machine statuses from backend
@@ -54,6 +58,31 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
+  // Fetch rooms for search
+  useEffect(() => {
+    const fetchRooms = async () => {
+      try {
+        const token = Cookies.get('auth_token');
+        if (token) {
+          // Try to fetch user's rooms
+          const response = await fetch(`${BACKEND_URL}/api/rooms`, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          if (response.ok) {
+            const data = await response.json();
+            setRooms(data.rooms || []);
+          }
+        }
+      } catch (error) {
+        console.error('❌ Error fetching rooms:', error);
+      }
+    };
+
+    fetchRooms();
+  }, []);
+
   // Convert backend data to machine array (only show machines that have reported)
   const allMachines = Object.keys(machineStatuses).map(machineId => {
     const status = machineStatuses[machineId];
@@ -70,10 +99,32 @@ export default function Dashboard() {
     };
   });
 
-  // Filter machines based on search term
-  const machines = allMachines.filter(machine =>
-    machine.id.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Filter machines based on room search
+  let machines = allMachines;
+  if (searchTerm) {
+    // Find rooms that match the search term
+    const matchingRooms = rooms.filter(room =>
+      room.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (room.building && room.building.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (room.floor && room.floor.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+
+    // Get machine IDs from matching rooms
+    const matchingMachineIds = new Set();
+    matchingRooms.forEach(room => {
+      if (room.machineIds && Array.isArray(room.machineIds)) {
+        room.machineIds.forEach(id => matchingMachineIds.add(id));
+      }
+    });
+
+    // Filter machines that belong to matching rooms
+    if (matchingMachineIds.size > 0) {
+      machines = allMachines.filter(machine => matchingMachineIds.has(machine.id));
+    } else {
+      // No matching rooms found
+      machines = [];
+    }
+  }
 
   console.log('🔧 Displaying machines:', machines);
 
@@ -109,7 +160,7 @@ export default function Dashboard() {
           <input
             type="text"
             className={styles.searchInput}
-            placeholder="Search machines by ID (e.g., a1-m1)..."
+            placeholder="Search rooms by name, building, or floor..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -135,8 +186,8 @@ export default function Dashboard() {
         </div>
       ) : machines.length === 0 && searchTerm ? (
         <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
-          <h2>No machines found</h2>
-          <p>No machines match "{searchTerm}"</p>
+          <h2>No rooms found</h2>
+          <p>No rooms match "{searchTerm}"</p>
           <button
             onClick={() => setSearchTerm('')}
             style={{

@@ -33,13 +33,27 @@ export default async function handler(req, res) {
     const users = await getCollection('users');
     const userId = new ObjectId(tokenData.userId);
 
-    // GET - Get all rooms for the current user
+    // GET - Get all rooms for the current user + all public rooms
     if (req.method === 'GET') {
+      // Get user's rooms
       const userRooms = await rooms.find({ userId }).sort({ createdAt: -1 }).toArray();
+      
+      // Get all public rooms
+      const publicRooms = await rooms.find({ isPublic: true }).sort({ name: 1 }).toArray();
+      
+      // Combine and remove duplicates (in case user has a room that's also public)
+      const roomMap = new Map();
+      [...userRooms, ...publicRooms].forEach(room => {
+        if (!roomMap.has(room._id.toString())) {
+          roomMap.set(room._id.toString(), room);
+        }
+      });
+      
+      const allRooms = Array.from(roomMap.values());
 
       return res.status(200).json({
         success: true,
-        rooms: userRooms
+        rooms: allRooms
       });
     }
 
