@@ -33,78 +33,31 @@ export default async function handler(req, res) {
     const users = await getCollection('users');
     const userId = new ObjectId(tokenData.userId);
 
-    // GET - Get all rooms for the current user + all public rooms
+    // GET - Get user's room list + all available rooms for search
     if (req.method === 'GET') {
-      // Get user's rooms
-      const userRooms = await rooms.find({ userId }).sort({ createdAt: -1 }).toArray();
-      
-      // Get all public rooms
+      // Get user document to find their room list
+      const user = await users.findOne({ _id: userId });
+      const userRoomIds = user?.roomIds || [];
+
+      // Get rooms in user's list
+      const userRoomObjectIds = userRoomIds.map(id => new ObjectId(id));
+      const userRoomsList = await rooms.find({ 
+        _id: { $in: userRoomObjectIds } 
+      }).sort({ name: 1 }).toArray();
+
+      // Get all public rooms (for search/adding)
       const publicRooms = await rooms.find({ isPublic: true }).sort({ name: 1 }).toArray();
-      
-      // Combine and remove duplicates (in case user has a room that's also public)
-      const roomMap = new Map();
-      [...userRooms, ...publicRooms].forEach(room => {
-        if (!roomMap.has(room._id.toString())) {
-          roomMap.set(room._id.toString(), room);
-        }
-      });
-      
-      const allRooms = Array.from(roomMap.values());
 
       return res.status(200).json({
         success: true,
-        rooms: allRooms
+        userRooms: userRoomsList, // Rooms in user's list
+        availableRooms: publicRooms // All public rooms available to add
       });
     }
 
-    // POST - Create a new room
+    // POST - Add a room to user's list (not create a new room)
     if (req.method === 'POST') {
-      const { name, building, floor, machineIds } = req.body;
-
-      // Validate input
-      if (!name) {
-        return res.status(400).json({
-          success: false,
-          error: 'Room name is required'
-        });
-      }
-
-      // Create room document
-      const newRoom = {
-        userId,
-        name,
-        building: building || '',
-        floor: floor || '',
-        machineIds: machineIds || [], // Array of machine IDs in this room
-        createdAt: new Date(),
-        updatedAt: new Date()
-      };
-
-      const result = await rooms.insertOne(newRoom);
-
-      // Add room ID to user's rooms array
-      await users.updateOne(
-        { _id: userId },
-        {
-          $push: { rooms: result.insertedId },
-          $set: { updatedAt: new Date() }
-        }
-      );
-
-      console.log(`✅ Room created: "${name}" by ${tokenData.username}`);
-
-      return res.status(201).json({
-        success: true,
-        room: {
-          _id: result.insertedId,
-          ...newRoom
-        }
-      });
-    }
-
-    // PUT - Update a room
-    if (req.method === 'PUT') {
-      const { roomId, name, building, floor, machineIds } = req.body;
+      const { roomId } = req.body;
 
       if (!roomId) {
         return res.status(400).json({
@@ -113,46 +66,60 @@ export default async function handler(req, res) {
         });
       }
 
-      // Verify room belongs to user
-      const room = await rooms.findOne({
-        _id: new ObjectId(roomId),
-        userId
+      const roomObjectId = new ObjectId(roomId);
+
+      // Verify room exists and is public
+      const room = await rooms.findOne({ 
+        _id: roomObjectId,
+        isPublic: true 
       });
 
       if (!room) {
         return res.status(404).json({
           success: false,
-          error: 'Room not found or access denied'
+          error: 'Room not found or not available'
         });
       }
 
-      // Update room
-      const updates = {
-        updatedAt: new Date()
-      };
+      // Check if user already has this room
+      const user = await users.findOne({ _id: userId });
+      const userRoomIds = user?.roomIds || [];
+      
+      if (userRoomIds.some(id => id.toString() === roomId)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Room already in your list'
+        });
+      }
 
-      if (name !== undefined) updates.name = name;
-      if (building !== undefined) updates.building = building;
-      if (floor !== undefined) updates.floor = floor;
-      if (machineIds !== undefined) updates.machineIds = machineIds;
-
-      await rooms.updateOne(
-        { _id: new ObjectId(roomId) },
-        { $set: updates }
+      // Add room ID to user's roomIds array
+      await users.updateOne(
+        { _id: userId },
+        {
+          $push: { roomIds: roomObjectId },
+          $set: { updatedAt: new Date() }
+        },
+        { upsert: true }
       );
 
-      console.log(`✅ Room updated: "${name}" by ${tokenData.username}`);
+      console.log(`✅ Room "${room.name}" added to ${tokenData.username}'s list`);
 
       return res.status(200).json({
         success: true,
-        room: {
-          ...room,
-          ...updates
-        }
+        message: 'Room added to your list',
+        room
       });
     }
 
-    // DELETE - Delete a room
+    // PUT - Not allowed for regular users (only admins can edit rooms)
+    if (req.method === 'PUT') {
+      return res.status(403).json({
+        success: false,
+        error: 'Only administrators can edit room information. Users can only add/remove rooms from their list.'
+      });
+    }
+
+    // DELETE - Remove a room from user's list (not delete the room itself)
     if (req.method === 'DELETE') {
       const { roomId } = req.query;
 
@@ -165,36 +132,31 @@ export default async function handler(req, res) {
 
       const roomObjectId = new ObjectId(roomId);
 
-      // Verify room belongs to user
-      const room = await rooms.findOne({
-        _id: roomObjectId,
-        userId
-      });
-
-      if (!room) {
+      // Verify room is in user's list
+      const user = await users.findOne({ _id: userId });
+      const userRoomIds = user?.roomIds || [];
+      
+      if (!userRoomIds.some(id => id.toString() === roomId)) {
         return res.status(404).json({
           success: false,
-          error: 'Room not found or access denied'
+          error: 'Room not found in your list'
         });
       }
 
-      // Delete room
-      await rooms.deleteOne({ _id: roomObjectId });
-
-      // Remove room ID from user's rooms array
+      // Remove room ID from user's roomIds array
       await users.updateOne(
         { _id: userId },
         {
-          $pull: { rooms: roomObjectId },
+          $pull: { roomIds: roomObjectId },
           $set: { updatedAt: new Date() }
         }
       );
 
-      console.log(`✅ Room deleted: "${room.name}" by ${tokenData.username}`);
+      console.log(`✅ Room removed from ${tokenData.username}'s list`);
 
       return res.status(200).json({
         success: true,
-        message: 'Room deleted successfully'
+        message: 'Room removed from your list'
       });
     }
 

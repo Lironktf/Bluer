@@ -4,7 +4,6 @@ import { useAuth } from '../context/AuthContext';
 import Navigation from '../components/Navigation/Navigation';
 import AuthModal from '../components/Auth/AuthModal';
 import RoomSelector from '../components/RoomSelector/RoomSelector';
-import RoomForm from '../components/RoomForm/RoomForm';
 import Cookies from 'js-cookie';
 import './MyRooms.css';
 
@@ -14,13 +13,10 @@ export default function MyRooms() {
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const navigate = useNavigate();
 
-  const [rooms, setRooms] = useState([]);
-  const [allAvailableRooms, setAllAvailableRooms] = useState([]); // All rooms for search
+  const [userRooms, setUserRooms] = useState([]); // Rooms in user's list
+  const [availableRooms, setAvailableRooms] = useState([]); // All available rooms to add
   const [loading, setLoading] = useState(true);
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [selectedRoomId, setSelectedRoomId] = useState(null);
-  const [editingRoom, setEditingRoom] = useState(null);
-  const [showRoomForm, setShowRoomForm] = useState(false);
 
   useEffect(() => {
     if (!authLoading) {
@@ -40,7 +36,6 @@ export default function MyRooms() {
     }
 
     try {
-      // Fetch user's rooms + all public rooms
       const response = await fetch(`${API_BASE_URL}/api/rooms`, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -49,14 +44,12 @@ export default function MyRooms() {
 
       if (response.ok) {
         const data = await response.json();
-        const allRooms = data.rooms || [];
-        console.log('📦 Fetched rooms:', allRooms.length, 'rooms');
-        setRooms(allRooms);
-        setAllAvailableRooms(allRooms); // All available rooms for search
+        setUserRooms(data.userRooms || []);
+        setAvailableRooms(data.availableRooms || []);
+        console.log('📦 User rooms:', data.userRooms?.length || 0);
+        console.log('📦 Available rooms:', data.availableRooms?.length || 0);
       } else {
-        console.error('❌ Failed to fetch rooms:', response.status, response.statusText);
-        const errorData = await response.json().catch(() => ({}));
-        console.error('Error details:', errorData);
+        console.error('❌ Failed to fetch rooms:', response.status);
       }
     } catch (error) {
       console.error('Failed to fetch rooms:', error);
@@ -65,34 +58,37 @@ export default function MyRooms() {
     }
   }
 
-  async function handleSaveRoom(roomData) {
+  async function handleAddRoom(roomId) {
     const token = Cookies.get('auth_token');
-    if (!editingRoom) return; // Should not happen
+    if (!token) return;
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/rooms`, {
-        method: 'PUT',
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ ...roomData, roomId: editingRoom._id })
+        body: JSON.stringify({ roomId })
       });
 
       if (response.ok) {
-        await fetchRooms();
-        setShowRoomForm(false);
-        setEditingRoom(null);
+        await fetchRooms(); // Refresh the list
+      } else {
+        const errorData = await response.json();
+        alert(errorData.error || 'Failed to add room');
       }
     } catch (error) {
-      console.error('Failed to save room:', error);
+      console.error('Failed to add room:', error);
+      alert('Failed to add room');
     }
   }
 
-  async function handleDelete(roomId) {
-    if (!confirm('Are you sure you want to delete this room?')) return;
+  async function handleRemoveRoom(roomId) {
+    if (!confirm('Remove this room from your list?')) return;
 
     const token = Cookies.get('auth_token');
+    if (!token) return;
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/rooms?roomId=${roomId}`, {
@@ -103,15 +99,24 @@ export default function MyRooms() {
       });
 
       if (response.ok) {
-        await fetchRooms();
-        setSelectedRoomId(null);
+        await fetchRooms(); // Refresh the list
+      } else {
+        const errorData = await response.json();
+        alert(errorData.error || 'Failed to remove room');
       }
     } catch (error) {
-      console.error('Failed to delete room:', error);
+      console.error('Failed to remove room:', error);
+      alert('Failed to remove room');
     }
   }
 
-  const selectedRoom = rooms.find(room => room._id === selectedRoomId);
+  function handleRoomClick(room) {
+    // Navigate to Dashboard with room name in search
+    navigate('/', { 
+      state: { roomName: room.name },
+      replace: false
+    });
+  }
 
   if (authLoading || loading) {
     return (
@@ -142,6 +147,10 @@ export default function MyRooms() {
     );
   }
 
+  // Filter available rooms to exclude ones already in user's list
+  const userRoomIds = new Set(userRooms.map(r => r._id.toString()));
+  const roomsToAdd = availableRooms.filter(room => !userRoomIds.has(room._id.toString()));
+
   return (
     <>
       <Navigation />
@@ -153,67 +162,65 @@ export default function MyRooms() {
           </div>
         </div>
 
-        <RoomSelector
-          rooms={allAvailableRooms}
-          selectedRoom={selectedRoomId}
-          onRoomChange={setSelectedRoomId}
-        />
-
-        {showRoomForm && (
-          <RoomForm
-            editingRoom={editingRoom}
-            onSave={handleSaveRoom}
-            onCancel={() => {
-              setShowRoomForm(false);
-              setEditingRoom(null);
+        {/* Search to add more rooms */}
+        <div className="add-room-section">
+          <h2>Add Rooms</h2>
+          <p className="section-description">Search for rooms to add to your list</p>
+          <RoomSelector
+            rooms={roomsToAdd}
+            selectedRoom={null}
+            onRoomChange={(roomId) => {
+              if (roomId) {
+                handleAddRoom(roomId);
+              }
             }}
+            onAddRoom={handleAddRoom}
+            showAddButton={true}
           />
-        )}
+        </div>
 
-        {selectedRoom && !showRoomForm && (
-          <div className="room-card">
-            <div className="room-card-header">
-              <h3>{selectedRoom.name}</h3>
-              <div className="room-actions">
-                <button onClick={() => { setEditingRoom(selectedRoom); setShowRoomForm(true); }} className="edit-btn">
-                  Edit
-                </button>
-                <button onClick={() => handleDelete(selectedRoom._id)} className="delete-btn">
-                  Delete
-                </button>
-              </div>
+        {/* User's room cards */}
+        <div className="my-rooms-section">
+          <h2>Your Rooms ({userRooms.length})</h2>
+          {userRooms.length > 0 ? (
+            <div className="rooms-grid">
+              {userRooms.map((room) => (
+                <div key={room._id} className="room-card">
+                  <div className="room-card-content" onClick={() => handleRoomClick(room)}>
+                    <h3>{room.name}</h3>
+                    {(room.building || room.floor) && (
+                      <p className="room-location">
+                        {[room.building, room.floor].filter(Boolean).join(' • ')}
+                      </p>
+                    )}
+                    {room.machineIds && room.machineIds.length > 0 && (
+                      <div className="machine-ids">
+                        <strong>{room.machineIds.length}</strong> machine{room.machineIds.length !== 1 ? 's' : ''}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRemoveRoom(room._id);
+                    }}
+                    className="remove-btn"
+                    aria-label="Remove room"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
             </div>
-            {(selectedRoom.building || selectedRoom.floor) && (
-              <p className="room-location">
-                {[selectedRoom.building, selectedRoom.floor].filter(Boolean).join(' • ')}
-              </p>
-            )}
-            {selectedRoom.machineIds && selectedRoom.machineIds.length > 0 && (
-              <div className="machine-ids">
-                <strong>Machines:</strong> {selectedRoom.machineIds.join(', ')}
-              </div>
-            )}
-            <button
-              onClick={() => navigate('/', { state: { filterMachines: selectedRoom.machineIds } })}
-              className="view-machines-btn"
-            >
-              View Machines
-            </button>
-          </div>
-        )}
-
-        {!selectedRoom && !showRoomForm && rooms.length > 0 && (
-          <div className="empty-state">
-            <p>Select a room to view its details.</p>
-          </div>
-        )}
-
-        {rooms.length === 0 && !showRoomForm && (
-          <div className="empty-state">
-            <p>Add rooms by searching from them!</p>
-          </div>
-        )}
+          ) : (
+            <div className="empty-state">
+              <p>You haven't added any rooms yet.</p>
+              <p>Use the search above to add rooms to your list.</p>
+            </div>
+          )}
+        </div>
       </div>
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
     </>
   );
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import Navigation from '../components/Navigation/Navigation';
 import MachineGrid from '../components/MachineGrid/MachineGrid';
@@ -8,6 +9,9 @@ import Cookies from 'js-cookie';
 const BACKEND_URL = 'https://laun-dryer.vercel.app';
 
 export default function Dashboard() {
+  const location = useLocation();
+  const navigate = useNavigate();
+
   // State for broken machines (persisted in localStorage)
   const [brokenMachines, setBrokenMachines] = useLocalStorage('brokenMachines', {});
 
@@ -24,7 +28,20 @@ export default function Dashboard() {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // State for search/filter (now searches rooms)
-  const [searchTerm, setSearchTerm] = useState('');
+  // Initialize from URL params or location state
+  const [searchTerm, setSearchTerm] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get('room') || location.state?.roomName || '';
+  });
+
+  // Update search term when location state changes (from MyRooms navigation)
+  useEffect(() => {
+    if (location.state?.roomName && location.state.roomName !== searchTerm) {
+      setSearchTerm(location.state.roomName);
+      // Clear the state to avoid re-triggering
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state]);
 
   // Fetch machine statuses from backend
   useEffect(() => {
@@ -99,15 +116,35 @@ export default function Dashboard() {
     };
   });
 
+  // Update URL when search term changes
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (searchTerm) {
+      params.set('room', searchTerm);
+    } else {
+      params.delete('room');
+    }
+    const newSearch = params.toString();
+    const newUrl = newSearch ? `${location.pathname}?${newSearch}` : location.pathname;
+    if (newUrl !== location.pathname + location.search) {
+      navigate(newUrl, { replace: true });
+    }
+  }, [searchTerm, location.pathname, navigate]);
+
   // Filter machines based on room search
   let machines = allMachines;
   if (searchTerm) {
-    // Find rooms that match the search term
+    // Find rooms that match the search term (exact match or partial)
+    const searchLower = searchTerm.toLowerCase();
     const matchingRooms = rooms.filter(room =>
-      room.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (room.building && room.building.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (room.floor && room.floor.toLowerCase().includes(searchTerm.toLowerCase()))
+      room.name.toLowerCase().includes(searchLower) ||
+      room.name.toLowerCase() === searchLower ||
+      (room.building && room.building.toLowerCase().includes(searchLower)) ||
+      (room.floor && room.floor.toLowerCase().includes(searchLower))
     );
+
+    console.log('🔍 Search term:', searchTerm);
+    console.log('🏠 Matching rooms:', matchingRooms.map(r => r.name));
 
     // Get machine IDs from matching rooms
     const matchingMachineIds = new Set();
@@ -116,6 +153,8 @@ export default function Dashboard() {
         room.machineIds.forEach(id => matchingMachineIds.add(id));
       }
     });
+
+    console.log('🔧 Matching machine IDs:', Array.from(matchingMachineIds));
 
     // Filter machines that belong to matching rooms
     if (matchingMachineIds.size > 0) {

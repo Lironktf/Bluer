@@ -1,18 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import styles from './RoomSelector.module.css';
 
-export default function RoomSelector({ rooms, selectedRoom, onRoomChange }) {
+export default function RoomSelector({ rooms, selectedRoom, onRoomChange, onAddRoom, showAddButton = false }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef(null);
-
-  // Debug: Log rooms when they change
-  useEffect(() => {
-    console.log('🔍 RoomSelector: Received', rooms?.length || 0, 'rooms');
-    if (rooms && rooms.length > 0) {
-      console.log('Rooms:', rooms.map(r => ({ name: r.name, id: r._id })));
-    }
-  }, [rooms]);
 
   // Get the selected room name
   const selectedRoomName = rooms.find(room => room._id === selectedRoom)?.name || '';
@@ -40,15 +32,23 @@ export default function RoomSelector({ rooms, selectedRoom, onRoomChange }) {
   }, []);
 
   const handleSelect = (roomId) => {
-    onRoomChange(roomId);
-    setIsOpen(false);
-    setSearchTerm('');
+    if (showAddButton && onAddRoom) {
+      // If in "add" mode, call onAddRoom instead
+      onAddRoom(roomId);
+      setIsOpen(false);
+      setSearchTerm('');
+    } else {
+      // Normal selection mode
+      onRoomChange(roomId);
+      setIsOpen(false);
+      setSearchTerm('');
+    }
   };
 
   return (
     <div className={styles.container} ref={containerRef}>
       <label htmlFor="room-search" className={styles.label}>
-        Select Room
+        {showAddButton ? 'Search for rooms to add' : 'Select Room'}
       </label>
       <div className={styles.searchContainer}>
         <input
@@ -68,6 +68,7 @@ export default function RoomSelector({ rooms, selectedRoom, onRoomChange }) {
                   key={room._id}
                   className={`${styles.option} ${room._id === selectedRoom ? styles.selected : ''}`}
                   onClick={() => handleSelect(room._id)}
+                  style={showAddButton ? { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } : {}}
                 >
                   <div>
                     <strong>{room.name}</strong>
@@ -77,6 +78,11 @@ export default function RoomSelector({ rooms, selectedRoom, onRoomChange }) {
                       </span>
                     )}
                   </div>
+                  {showAddButton && (
+                    <span style={{ fontSize: '0.85rem', color: '#3b82f6', fontWeight: '600', marginLeft: '1rem' }}>
+                      + Add
+                    </span>
+                  )}
                 </li>
               ))
             ) : searchTerm ? (
