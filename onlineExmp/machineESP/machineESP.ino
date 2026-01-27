@@ -51,7 +51,7 @@ float
 
 // Machine identification
 const char* machineId = "a1-m1"; // e.g., "a1-m1", "a2-m5", "b1-m3"
-const char* roomName = "STJ-Sieg/Ryan"; // Room this machine belongs to
+const char* roomName = "SJU-Sieg/Ryan"; // Room this machine belongs to
 #define MACHINE_ID_MAX_LEN 16    // Max length for machineId in BLE advertisement
 #define ROOM_NAME_MAX_LEN 32     // Max length for room name in BLE advertisement
 

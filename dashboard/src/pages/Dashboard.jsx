@@ -8,6 +8,8 @@ import styles from './Dashboard.module.css';
 import Cookies from 'js-cookie';
 
 const BACKEND_URL = 'https://laun-dryer.vercel.app';
+// Default room to preload on first load (must match a room.name from the DB)
+const DEFAULT_ROOM_NAME = 'SJU-Sieg/Ryan';
 
 export default function Dashboard() {
   const location = useLocation();
@@ -99,13 +101,14 @@ export default function Dashboard() {
 
         setRooms(uniqueRooms);
 
-        // Preload first room if no search term is set and no URL param
+        // Preload default room (or first room) if no search term is set and no URL param
         const urlParams = new URLSearchParams(location.search);
         const urlRoom = urlParams.get('room');
         if (uniqueRooms.length > 0 && !searchTerm && !urlRoom && !location.state?.roomName) {
-          const firstRoom = uniqueRooms[0];
-          console.log('🏠 Preloading first room:', firstRoom.name);
-          setSearchTerm(firstRoom.name);
+          // Try to find the configured default room by name
+          const preferred = uniqueRooms.find(r => r.name === DEFAULT_ROOM_NAME) || uniqueRooms[0];
+          console.log('🏠 Preloading room:', preferred.name);
+          setSearchTerm(preferred.name);
         }
       } catch (error) {
         console.error('❌ Error fetching rooms:', error);
