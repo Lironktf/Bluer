@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import Navigation from '../components/Navigation/Navigation';
 import MachineGrid from '../components/MachineGrid/MachineGrid';
+import RoomSearchAutocomplete from '../components/RoomSearchAutocomplete/RoomSearchAutocomplete';
 import styles from './Dashboard.module.css';
 import Cookies from 'js-cookie';
 
@@ -224,23 +225,12 @@ export default function Dashboard() {
       </div>
 
       <div className={styles.searchContainer}>
-        <input
-          type="text"
-          className={styles.searchInput}
-          placeholder={roomsLoading ? "Loading rooms..." : "Search rooms by name, building, or floor..."}
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+        <RoomSearchAutocomplete
+          rooms={rooms}
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
           disabled={roomsLoading}
         />
-        {searchTerm && (
-          <button
-            className={styles.clearButton}
-            onClick={() => setSearchTerm('')}
-            aria-label="Clear search"
-          >
-            ×
-          </button>
-        )}
       </div>
 
       {allMachines.length === 0 ? (

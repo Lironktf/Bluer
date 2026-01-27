@@ -33,7 +33,7 @@ async function addRoom() {
     const roomData = {
       name: 'STJ-Sieg/Ryan',
       building: 'Sieg/Ryan',
-      floor: '',
+      floor: 'bruuhhhh',
       machineIds: [], // Add machine IDs here if needed
       isPublic: true, // Public room, not tied to a specific user
       userId: null, // No specific owner
