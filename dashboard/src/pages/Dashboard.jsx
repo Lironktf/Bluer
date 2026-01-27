@@ -129,7 +129,8 @@ export default function Dashboard() {
       id: machineId,
       number: number,
       isRunning: status.running,
-      isEmpty: status.empty
+      isEmpty: status.empty,
+      room: status.room || null, // Room name from machines API
     };
   });
 
@@ -148,7 +149,7 @@ export default function Dashboard() {
     }
   }, [searchTerm, location.pathname, navigate]);
 
-  // Filter machines based on room search (same logic as RoomSelector)
+  // Filter machines based on room search
   let machines = allMachines;
   if (searchTerm && rooms.length > 0) {
     const searchLower = searchTerm.toLowerCase();
@@ -164,28 +165,18 @@ export default function Dashboard() {
 
     console.log('🔍 Search term:', searchTerm);
     console.log('📦 Total rooms available:', rooms.length);
-    console.log('🏠 Matching rooms:', matchingRooms.map(r => ({ name: r.name, machineIds: r.machineIds })));
+    console.log('🏠 Matching rooms:', matchingRooms.map(r => ({ name: r.name })));
 
-    // Get machine IDs from matching rooms
-    const matchingMachineIds = new Set();
-    matchingRooms.forEach(room => {
-      if (room.machineIds && Array.isArray(room.machineIds)) {
-        room.machineIds.forEach(id => matchingMachineIds.add(id));
-      }
+    // Build set of matching room names
+    const matchingRoomNames = new Set(matchingRooms.map(r => r.name));
+
+    // Filter machines whose room (from machines API) matches one of the rooms
+    machines = allMachines.filter(machine => {
+      return machine.room && matchingRoomNames.has(machine.room);
     });
 
-    console.log('🔧 Matching machine IDs:', Array.from(matchingMachineIds));
     console.log('🔧 Total machines available:', allMachines.length);
-
-    // Filter machines that belong to matching rooms
-    if (matchingMachineIds.size > 0) {
-      machines = allMachines.filter(machine => matchingMachineIds.has(machine.id));
-      console.log('✅ Filtered to', machines.length, 'machines');
-    } else {
-      // No matching rooms found
-      machines = [];
-      console.log('❌ No machines found for matching rooms');
-    }
+    console.log('🔧 Machines after room filter:', machines.length);
   } else if (searchTerm && rooms.length === 0) {
     // Search term but no rooms loaded yet
     console.log('⚠️ Search term entered but rooms not loaded yet');
