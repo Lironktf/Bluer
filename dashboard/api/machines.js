@@ -8,6 +8,27 @@ import { getCollection } from './lib/mongodb.js';
  * - machineHistory: History of all state changes
  */
 
+/**
+ * Map machine ID prefix to room name
+ * Extracts prefix from machineId (e.g., "a1" from "a1-m1") and maps to room
+ * Update this mapping as you add new areas/machines
+ */
+function getRoomFromMachineId(machineId) {
+  // Extract prefix (e.g., "a1" from "a1-m1")
+  const match = machineId.match(/^([a-z0-9]+)-/i);
+  if (!match) return null;
+  
+  const prefix = match[1].toLowerCase();
+  
+  // Mapping: area prefix -> room name
+  const areaToRoomMap = {
+    'a1': 'SJU-Sieg/Ryan',
+    'a2': 'SJU-Finn',
+  };
+  
+  return areaToRoomMap[prefix] || null;
+}
+
 // Machine goes offline if not updated in 2 minutes
 const OFFLINE_TIMEOUT_MS = 2 * 60 * 1000;
 
@@ -52,6 +73,17 @@ export default async function handler(req, res) {
                           currentMachine.running !== running ||
                           currentMachine.empty !== empty;
 
+      // Map machine ID prefix to room (if not provided in request)
+      let roomName = room;
+      if (!roomName || typeof roomName !== 'string' || roomName.trim() === '') {
+        roomName = getRoomFromMachineId(machineId);
+        if (roomName) {
+          console.log(`📍 Mapped ${machineId} (prefix: ${machineId.match(/^([a-z0-9]+)-/i)?.[1]}) -> ${roomName}`);
+        }
+      } else {
+        roomName = roomName.trim();
+      }
+
       // Update or create machine document
       const updateData = {
         machineId,
@@ -62,9 +94,9 @@ export default async function handler(req, res) {
         updatedAt: now
       };
       
-      // Add room if provided
-      if (room && typeof room === 'string' && room.trim() !== '') {
-        updateData.room = room.trim();
+      // Add room if we have one (from request or mapping)
+      if (roomName) {
+        updateData.room = roomName;
       }
       
       await machines.updateOne(

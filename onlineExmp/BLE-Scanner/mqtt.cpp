@@ -138,14 +138,10 @@ bool MqttPublishMachineStatus(const char* machineId, const char* roomName, bool 
   // Build topic: laundry/machines/{machineId}/status
   String topic = String(MQTT_TOPIC_PREFIX) + machineId + "/status";
 
-  // Build JSON payload
+  // Build JSON payload (room mapping is done on backend)
   String payload = "{";
   payload += "\"machineId\":\"";
   payload += machineId;
-  if (roomName && strlen(roomName) > 0) {
-    payload += "\",\"room\":\"";
-    payload += roomName;
-  }
   payload += "\",\"running\":";
   payload += running ? "true" : "false";
   payload += ",\"empty\":";
