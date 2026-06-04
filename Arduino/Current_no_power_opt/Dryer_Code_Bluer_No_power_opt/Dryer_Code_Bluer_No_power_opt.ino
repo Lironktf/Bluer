@@ -35,7 +35,6 @@ bool dooropened = false; //Two door latch booleans to help determine if clothes 
 bool doorclosed = false;
 bool wasRunning = false;
 bool wasEmpty = true;
-bool waitingForDoorClose = false; // Existing door-close condition requires this flag
 
 // Wi-Fi reconnect timing
 unsigned long lastWifiReconnectAttempt = 0;
@@ -75,7 +74,7 @@ const char* serverUrl = "https://laun-dryer.vercel.app/api/machines";
 
 // Timing for sending updates (send every 5 seconds)
 unsigned long lastSendTime = 0;
-const unsigned long sendInterval = 5000; // 5 seconds in milliseconds
+const unsigned long sendInterval = 300000; // 5 min
 
 void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
   switch (event) {
@@ -181,6 +180,12 @@ void setup() {
     for (int i = 0; i < WINDOWTWO; i++) {
       activities[i] = 0.0;
     }
+    for (int i = 0; i < WINDOWTHREE; i++) {
+    deltastwo[i] = 0.0;
+    }
+    for (int i = 0; i < 6; i++) {
+    activitysmallHistory[i] = 0.0;
+    }
     prev_mag = 0;
     idx = 0;
     running = false;
@@ -199,9 +204,6 @@ void setup() {
 
 void loop() {
   maintainWiFiConnection();
-
-  // Clear MPU interrupt latch after waking
-  mpu.getIntStatus(); 
 
   record_mpu_accel();
   mpu_a_mag = sqrt(mpu_a_x * mpu_a_x + mpu_a_y * mpu_a_y + mpu_a_z * mpu_a_z);
@@ -259,14 +261,14 @@ void loop() {
   if (running == false && empty == false && dooropened == false && doorCooldown == 0){
       if (activitysmall > (activitysmall6ago + DOOROPENINGCHANGE)){ 
         dooropened = true; 
+        quiettime = 0; // reset timer after opening event
         Serial.println("[DOOR] Door opened!");
       }
-      quiettime = 0; // reset timer after opening event
   }
 
   // Detect door closing after it has been opened
   //In the last ten seconds
-  if (!running && !empty && dooropened && !doorclosed && !waitingForDoorClose){ //last condition so that this code doesnt just repeat forever as same coniditons are sill met
+  if (!running && !empty && dooropened && !doorclosed){
       if (activitysmall > (activitysmall6ago + DOORCLOSINGCHANGE) && quiettime > 40){
          doorclosed = true; //quiettime > 40 so that looks for door closing only after door opened has fully finished
          Serial.println("[DOOR] Door closed!");
@@ -277,6 +279,7 @@ void loop() {
         dooropened = false;
         doorclosed = false;
         quiettime = 0;
+        Serial.println("[STATE] Machine is now EMPTY (door left open)");
       }
   }
 
@@ -303,8 +306,13 @@ void loop() {
 
   // Send status update to server every 5 seconds
   unsigned long currentTime = millis();
+  if (empty != wasEmpty || running != wasRunning) {
+    sendStatusUpdate();
+    lastSendTime = millis();
+  }
+
   if (currentTime - lastSendTime >= sendInterval) {
-    sendStatusUpdate(); //add this logic if (empty != wasEmpty || running != wasRunning) {
+    sendStatusUpdate();
     lastSendTime = currentTime;
   }
 
