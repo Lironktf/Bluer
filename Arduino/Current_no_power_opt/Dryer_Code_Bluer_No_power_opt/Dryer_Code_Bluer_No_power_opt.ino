@@ -3,14 +3,13 @@
 #include <HTTPClient.h>
 #include <MPU6050.h>
 #include "esp_eap_client.h"
+#include "secrets.h"
 
 // University of Waterloo eduroam configuration.
 // Replace only the password before uploading.
 // Do not include < or > around the password. A ! does not need escaping.
 const char* EDUROAM_SSID = "eduroam";
 const char* EAP_IDENTITY = "anonymous@uwaterloo.ca";
-const char* EAP_USERNAME = "YOURINFO@uwaterloo.ca";
-const char* EAP_PASSWORD = "YOURPASSWORD";
 const char* EXPECTED_SERVER_NAME = "eduroam.uwaterloo.ca";
 
 
