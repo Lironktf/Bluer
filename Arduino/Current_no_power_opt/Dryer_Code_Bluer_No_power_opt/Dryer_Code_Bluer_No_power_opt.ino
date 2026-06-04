@@ -2,9 +2,17 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <MPU6050.h>
+#include "esp_eap_client.h"
 
-const char* ssid = "";
-const char* password = "";
+// University of Waterloo eduroam configuration.
+// Replace only the password before uploading.
+// Do not include < or > around the password. A ! does not need escaping.
+const char* EDUROAM_SSID = "eduroam";
+const char* EAP_IDENTITY = "anonymous@uwaterloo.ca";
+const char* EAP_USERNAME = "YOURINFO@uwaterloo.ca";
+const char* EAP_PASSWORD = "YOURPASSWORD";
+const char* EXPECTED_SERVER_NAME = "eduroam.uwaterloo.ca";
+
 
 #define MPU_ADDR 0x68 // I2C address from datasheet (AD0 should be logic low, wire to GND)
 // x high 3B, x low 3C, y high 3D, y low 3E, z high 3F, z low 40
@@ -28,6 +36,11 @@ bool dooropened = false; //Two door latch booleans to help determine if clothes 
 bool doorclosed = false;
 bool wasRunning = false;
 bool wasEmpty = true;
+bool waitingForDoorClose = false; // Existing door-close condition requires this flag
+
+// Wi-Fi reconnect timing
+unsigned long lastWifiReconnectAttempt = 0;
+const unsigned long wifiReconnectInterval = 15000;
 const int WINDOW = 20;   // 20 samples × 50 ms = 1 second, used to make activity variable
 const int WINDOWTWO = 10;   // 10 samples of activity variable = 10 seconds of data
 const int WINDOWTHREE = 4;   // 4 samples × 50 ms = 0.2, used to make activity small variable, shorter time frame here to detect quick things like door latch
@@ -65,8 +78,96 @@ const char* serverUrl = "https://laun-dryer.vercel.app/api/machines";
 unsigned long lastSendTime = 0;
 const unsigned long sendInterval = 5000; // 5 seconds in milliseconds
 
+void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
+  switch (event) {
+    case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+      Serial.println("[WIFI] Associated with an eduroam access point");
+      break;
+
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+      Serial.println();
+      Serial.println("========================================");
+      Serial.println("[WIFI] WiFi connected to eduroam!");
+      Serial.print("[WIFI] IP address: ");
+      Serial.println(WiFi.localIP());
+      Serial.print("[WIFI] Signal strength: ");
+      Serial.print(WiFi.RSSI());
+      Serial.println(" dBm");
+      Serial.println("========================================");
+      break;
+
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+      Serial.print("[WIFI] Disconnected. Reason code: ");
+      Serial.println(info.wifi_sta_disconnected.reason);
+      break;
+
+    default:
+      break;
+  }
+}
+
+void connectToEduroam() {
+  Serial.println("[WIFI] Configuring secure Waterloo eduroam connection...");
+
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.onEvent(onWiFiEvent);
+
+  // Use Espressif's trusted CA bundle to validate the authentication server.
+  esp_eap_client_clear_ca_cert();
+
+  esp_err_t bundleResult = esp_eap_client_use_default_cert_bundle(true);
+  Serial.print("[WIFI] Default CA bundle setup: ");
+  Serial.println(esp_err_to_name(bundleResult));
+
+  // Require the authentication server certificate to match Waterloo's server.
+  esp_err_t domainResult = esp_eap_client_set_domain_name(EXPECTED_SERVER_NAME);
+  Serial.print("[WIFI] Server-name validation setup: ");
+  Serial.println(esp_err_to_name(domainResult));
+
+  Serial.println("[WIFI] Connecting to eduroam...");
+
+  WiFi.begin(
+    EDUROAM_SSID,
+    WPA2_AUTH_PEAP,
+    EAP_IDENTITY,
+    EAP_USERNAME,
+    EAP_PASSWORD
+  );
+
+  const unsigned long connectionTimeout = 30000;
+  unsigned long startTime = millis();
+
+  while (WiFi.status() != WL_CONNECTED &&
+         millis() - startTime < connectionTimeout) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[WIFI] Initial eduroam connection timed out.");
+    Serial.println("[WIFI] The monitor will keep running and retry automatically.");
+  }
+}
+
+void maintainWiFiConnection() {
+  if (WiFi.status() == WL_CONNECTED) {
+    return;
+  }
+
+  unsigned long currentTime = millis();
+
+  if (currentTime - lastWifiReconnectAttempt >= wifiReconnectInterval) {
+    lastWifiReconnectAttempt = currentTime;
+    Serial.println("[WIFI] Attempting to reconnect to eduroam...");
+    WiFi.reconnect();
+  }
+}
+
 void setup() {
-  Serial.begin(38400);
+  Serial.begin(115200);
   delay(500);
 
   Serial.println("\n\n========================================");
@@ -88,16 +189,8 @@ void setup() {
   // Initialize I2C for accelerometer
   Wire.begin(21, 22);
 
-  // Connect to WiFi
-  Serial.println("Connecting to WiFi...");
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED){
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\n✅ WiFi Connected!");
-  Serial.print("IP: ");
-  Serial.println(WiFi.localIP());
+  // Connect securely to University of Waterloo eduroam
+  connectToEduroam();
 
   mpu.initialize();
 
@@ -106,6 +199,8 @@ void setup() {
 }
 
 void loop() {
+  maintainWiFiConnection();
+
   // Clear MPU interrupt latch after waking
   mpu.getIntStatus(); 
 
