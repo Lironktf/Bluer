@@ -12,7 +12,6 @@ const char* EDUROAM_SSID = "eduroam";
 const char* EAP_IDENTITY = "anonymous@uwaterloo.ca";
 const char* EXPECTED_SERVER_NAME = "eduroam.uwaterloo.ca";
 
-
 #define MPU_ADDR 0x68 // I2C address from datasheet (AD0 should be logic low, wire to GND)
 // x high 3B, x low 3C, y high 3D, y low 3E, z high 3F, z low 40
 #define ACCEL_REG 0x3B
@@ -169,7 +168,7 @@ void setup() {
   delay(500);
 
   Serial.println("\n\n========================================");
-  Serial.println("   Laundry Machine Monitor");
+  Serial.println("   Dryer Monitor");
   Serial.printf("   Machine ID: %s\n", machineId);
   Serial.println("========================================\n");
 
@@ -274,7 +273,7 @@ void loop() {
          Serial.println("[DOOR] Door closed!");
       }
       quiettime++; // count time between open and close
-      if (quiettime > 2400){
+      if (quiettime > 1800){
         empty = true; //Machine is empty because door has been left open for > 2 minutes
         dooropened = false;
         doorclosed = false;
@@ -304,7 +303,7 @@ void loop() {
   doorCooldown--;
   }
 
-  // Send status update to server every 5 seconds
+  // Send status update to server every 5 min
   unsigned long currentTime = millis();
   if (empty != wasEmpty || running != wasRunning) {
     sendStatusUpdate();
@@ -395,19 +394,23 @@ void sendStatusUpdate() {
 }
 
  void print_accels() {
-    /*Serial.print("mpu_a_x:");
-    Serial.print(mpu_a_x);
-    Serial.print(' ');
-    Serial.print("mpu_a_y:");
-    Serial.print(mpu_a_y);
-    Serial.print(' ');
-    Serial.print("mpu_a_z:");
-    Serial.print(mpu_a_z);
-    Serial.print(' '); 
-    Serial.print("change over last second:");
-    Serial.print(activity);
-    Serial.print(' ');
-    Serial.print("mpu_a_mag:");
-    Serial.print(mpu_a_mag);
-    Serial.println();*/
-  }
+
+  Serial.print(avg10);                 // Average activity (10 s)
+
+  Serial.print('\t');
+
+  Serial.print(activitysmall);         // Short-term activity
+
+  Serial.print('\t');
+
+  Serial.print(mpu_a_mag);             // Raw acceleration magnitude
+
+  Serial.print('\t');
+
+  Serial.print(running ? 1 : 0);       // Running
+
+  Serial.print('\t');
+
+  Serial.println(empty ? 1 : 0);       // Empty + end of line
+
+}
