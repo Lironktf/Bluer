@@ -4,6 +4,8 @@
 #include <MPU6050.h>
 #include "esp_eap_client.h"
 #include "secrets.h"
+#include <NimBLEDevice.h>
+#include <WiFiClientSecure.h>
 
 // University of Waterloo eduroam configuration.
 // Replace only the password before uploading.
@@ -34,6 +36,17 @@ bool dooropened = false; //Two door latch booleans to help determine if clothes 
 bool doorclosed = false;
 bool wasRunning = false;
 bool wasEmpty = true;
+
+// Global status tracking for the washer captured over Bluetooth
+volatile bool washerRunning = false;
+volatile bool washerEmpty = true;
+bool lastSentWasherRunning = false;
+bool lastSentWasherEmpty = true;
+volatile bool washerChanged = false; // "volatile" ensures safe multi-threaded core operations
+unsigned long lastBleScanTime = 0;
+const unsigned long bleScanInterval = 20000; // 10 seconds total cycle time
+
+NimBLEScan* pBLEScan;
 
 // Wi-Fi reconnect timing
 unsigned long lastWifiReconnectAttempt = 0;
@@ -68,12 +81,35 @@ float
 ;
 
 // Machine identification and server configuration
-const char* machineId = "a1-m1"; // e.g., "a1-m1", "a2-m5", "b1-m3"
+const char* machineId = "a1-m3"; // e.g., "a1-m1", "a2-m5", "b1-m3"
 const char* serverUrl = "https://laun-dryer.vercel.app/api/machines";
+const char* washerMachineId = "a1-m1"; 
 
 // Timing for sending updates (send every 5 seconds)
 unsigned long lastSendTime = 0;
 const unsigned long sendInterval = 300000; // 5 min
+
+class MyAdvertisedDeviceCallbacks: public NimBLEScanCallbacks {
+    void onResult(const NimBLEAdvertisedDevice* advertisedDevice) override {
+      if (advertisedDevice->getName() == "WASHER_A1") {
+        std::string data = advertisedDevice->getManufacturerData();
+
+        if (data.length() >= 2) {
+          bool currentWasherRunning = (data[0] == '1');
+          bool currentWasherEmpty  = (data[1] == '1');
+
+          if (currentWasherRunning != lastSentWasherRunning || currentWasherEmpty != lastSentWasherEmpty) {
+            washerRunning = currentWasherRunning;
+            washerEmpty = currentWasherEmpty;
+            lastSentWasherRunning = currentWasherRunning;
+            lastSentWasherEmpty = currentWasherEmpty;
+            Serial.println("\n➔ [BLE Event] Washer state shifted! Routing directly to Vercel...");
+            washerChanged = true;
+          }
+        }
+      }
+    }
+};
 
 void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
   switch (event) {
@@ -199,6 +235,16 @@ void setup() {
 
   // Initialize accelerometer
   setup_mpu();
+
+  // Initialize background Bluetooth Sniffer engine
+  NimBLEDevice::init("");
+  pBLEScan = NimBLEDevice::getScan();
+  pBLEScan->setScanCallbacks(new MyAdvertisedDeviceCallbacks());
+  pBLEScan->setActiveScan(false);
+  pBLEScan->setInterval(100);
+  pBLEScan->setWindow(99);
+  pBLEScan->start(2000, false);   // 2000 ms = 2 seconds
+  Serial.println("[BLE] Initial 2-second startup scan complete.");
 }
 
 void loop() {
@@ -305,13 +351,44 @@ void loop() {
 
   // Send status update to server every 5 min
   unsigned long currentTime = millis();
+
+  // Checks the air for 2 seconds, then completely turns off BLE for 8 seconds
+  if (currentTime - lastBleScanTime >= bleScanInterval) {
+    lastBleScanTime = currentTime;
+    
+    Serial.println("[BLE] Sniffing the air for washer updates...");
+    
+    // Scans for exactly 2 seconds, runs your callback if a packet is found, then stops
+    pBLEScan->start(2000, false);   // 2000 ms = 2 seconds
+    
+    // Crucial: Clear RAM immediately so the BLE cache doesn't crash eduroam
+    pBLEScan->clearResults(); 
+    
+    Serial.println("[BLE] Scan complete. Radio handed back to eduroam.");
+  }
+
+    // WASHER NETWORK ROUTER: Handles the washer network transmission safely on main thread time
+  if (washerChanged) {
+    washerChanged = false; // Reset flag instantly to prevent duplicate triggers
+    Serial.println("\n➔ [Dryer Router] Handling deferred Washer payload trigger safely on loop timeline...");
+    sendCustomStatusUpdate(washerMachineId, washerRunning, washerEmpty);
+  }
+
   if (empty != wasEmpty || running != wasRunning) {
-    sendStatusUpdate();
-    lastSendTime = millis();
+    // FIX: Only attempt transmission and reset the state tracking variables 
+    // IF the eduroam handshake is officially complete!
+    if (WiFi.status() == WL_CONNECTED) {
+      sendCustomStatusUpdate(machineId, running, empty);
+      wasRunning = running; // Only update these mirrors when successfully processed
+      wasEmpty = empty;
+      lastSendTime = millis();
+    } else {//BEFORE JUST HAD THE TWO SIMPLE LINES
+      Serial.println("➔ [Dryer Loop] State shift detected, but eduroam IP handshake is not ready yet. Deferring upload...");
+    }
   }
 
   if (currentTime - lastSendTime >= sendInterval) {
-    sendStatusUpdate();
+    sendCustomStatusUpdate(machineId, running, empty);
     lastSendTime = currentTime;
   }
 
@@ -363,54 +440,90 @@ void record_mpu_accel() {
   mpu_a_z = a_z_raw / LSB_SENS;
 }
 
-void sendStatusUpdate() {
+void sendCustomStatusUpdate(const char* targetMachineId, bool isRunning, bool isEmpty) {
+  if (WiFi.status() == WL_CONNECTED) {
+    // 1. Create a secure network transport client layer
+    WiFiClientSecure client;
+    
+    // FIX: Apply the insecure flag directly to the SECURE CLIENT layer!
+    // This tells the radio chip to skip loading the massive cert validation bundle, freeing up RAM.
+    client.setInsecure(); 
+
+    // 2. Initialize your HTTP layer and pass the secure client into it
+    HTTPClient http;
+    http.begin(client, serverUrl); // Passes your client object and destination url together
+    
+    http.addHeader("Content-Type", "application/json");
+
+    // Properly escaped JSON string builder using the dynamic target parameters
+    String jsonPayload = "{\"machineId\":\"" + String(targetMachineId) + "\","
+                         "\"running\":" + (isRunning ? "true" : "false") + ","
+                         "\"empty\":" + (isEmpty ? "true" : "false") + "}";
+
+    int httpResponseCode = http.POST(jsonPayload);
+
+    if (httpResponseCode > 0) {
+      Serial.print("✅ Server Status [");
+      Serial.print(targetMachineId);
+      Serial.print("]: ");
+      Serial.println(httpResponseCode);
+    } else {
+      Serial.printf("freeHeap=%u  maxAlloc=%u\n", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+http.begin(client, serverUrl);
+      Serial.print("❌ Transmission Error [");
+      Serial.print(targetMachineId);
+      Serial.print("]: ");
+      Serial.println(httpResponseCode);
+    }
+
+    http.end();
+  } else {
+    Serial.print("❌ Network dropped: Deferred update payload for ");
+    Serial.println(targetMachineId);
+  }
+}
+
+/*void sendCustomStatusUpdate(const char* targetMachineId, bool isRunning, bool isEmpty) {
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
 
     http.begin(serverUrl);
     http.addHeader("Content-Type", "application/json");
 
-    // Create JSON payload
-    String jsonPayload = "{\"machineId\":\"" + String(machineId) +
-                        "\",\"running\":" + (running ? "true" : "false") +
-                        ",\"empty\":" + (empty ? "true" : "false") + "}";
+    // Properly escaped JSON string builder using the dynamic target profile parameters
+    String jsonPayload = "{\"machineId\":\"" + String(targetMachineId) + "\","
+                         "\"running\":" + (isRunning ? "true" : "false") + ","
+                         "\"empty\":" + (isEmpty ? "true" : "false") + "}";
 
     int httpResponseCode = http.POST(jsonPayload);
 
     if (httpResponseCode > 0) {
-      Serial.print("✅ Status sent: ");
+      Serial.print("✅ Server Status [");
+      Serial.print(targetMachineId);
+      Serial.print("]: ");
       Serial.println(httpResponseCode);
-      String response = http.getString();
-      Serial.println(response);
     } else {
-      Serial.print("❌ Error sending status: ");
+      Serial.print("❌ Transmission Error [");
+      Serial.print(targetMachineId);
+      Serial.print("]: ");
       Serial.println(httpResponseCode);
     }
 
     http.end();
   } else {
-    Serial.println("❌ WiFi not connected");
+    Serial.print("❌ Network dropped: Deferred update payload for ");
+    Serial.println(targetMachineId);
   }
-}
+}*/
 
  void print_accels() {
-
   Serial.print(avg10);                 // Average activity (10 s)
-
   Serial.print('\t');
-
   Serial.print(activitysmall);         // Short-term activity
-
   Serial.print('\t');
-
   Serial.print(mpu_a_mag);             // Raw acceleration magnitude
-
   Serial.print('\t');
-
   Serial.print(running ? 1 : 0);       // Running
-
   Serial.print('\t');
-
   Serial.println(empty ? 1 : 0);       // Empty + end of line
-
 }
