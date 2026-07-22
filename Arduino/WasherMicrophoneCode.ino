@@ -29,7 +29,7 @@ const unsigned long sendInterval = 300000; // 5 min
 #define I2S_SCK 26
 #define I2S_PORT I2S_NUM_0
 #define SAMPLES 512          
-#define SAMPLE_RATE 16000  
+#define SAMPLE_RATE 44100
 
 double vReal[SAMPLES];
 double vImag[SAMPLES];
@@ -140,7 +140,7 @@ void loop() {
   double prevlowmid = lowmid;
   lowmid = (c_lowmid > 0) ? (zone_lowmid / c_lowmid) : 0;
   high = (c_high > 0) ? (zone_high / c_high) : 0;
-  if ((prevlowmid > (lowmid + 150000)) && !running){
+  if ((prevlowmid > (lowmid + 180000)) && !running && !doorclosed){
     doorclosed = true;
     empty = true;
     Serial.println("Door Closed! Now Empty");
@@ -153,16 +153,19 @@ void loop() {
 
   double actualAvgWater = AvgHighFreq / WINDOW;
 
-  if (actualAvgWater > 180000){
+  if (actualAvgWater > 100000){
     lastIntakeHIGH = true;
+    Serial.print("HighIntake, 14 min break");
   }
 
-  if (actualAvgWater > 40000){
+  if (actualAvgWater > 23000){
     running = true;
     empty = false;
+    doorclosed = false;
     
-    if (quiettime > 0 && actualAvgWater < 180000){
-      lastIntakeHIGH = false; //If we are starting a new water in cycle, after a break where it was < 40000, then break gets reset to normal
+    if (quiettime > 0 && actualAvgWater < 100000){
+      lastIntakeHIGH = false; //If we are starting a new water in cycle, after a break where it was < 23000, then break gets reset to normal
+      Serial.println("No more HighIntake, 11 min break");
     }
 
     quiettime = 0;
@@ -171,9 +174,9 @@ void loop() {
     quiettime++;
   }
 
-  int maximumQuietLoops = 16559; // Standard 10-11 minutes limit
+  int maximumQuietLoops = 16559; // Standard 11 minutes limit
   if (lastIntakeHIGH) {
-    maximumQuietLoops = 21126; // Extended 14 minutes limit
+    maximumQuietLoops = 21110; // Extended 14 minutes limit
   }
 
   if (quiettime >= maximumQuietLoops){
