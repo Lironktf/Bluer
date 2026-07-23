@@ -81,9 +81,9 @@ float
 ;
 
 // Machine identification and server configuration
-const char* machineId = "a1-m3"; // e.g., "a1-m1", "a2-m5", "b1-m3"
+const char* machineId = "a1-m2"; // VARIES
 const char* serverUrl = "https://laun-dryer.vercel.app/api/machines";
-const char* washerMachineId = "a1-m1"; 
+const char* washerMachineId = "a1-m1"; //VARIES
 
 // Timing for sending updates (send every 5 seconds)
 unsigned long lastSendTime = 0;
@@ -91,7 +91,7 @@ const unsigned long sendInterval = 300000; // 5 min
 
 class MyAdvertisedDeviceCallbacks: public NimBLEScanCallbacks {
     void onResult(const NimBLEAdvertisedDevice* advertisedDevice) override {
-      if (advertisedDevice->getName() == "WASHER_A1") {
+      if (advertisedDevice->getName() == "WASHER_A1") { //VARIES
         std::string data = advertisedDevice->getManufacturerData();
 
         if (data.length() >= 2) {
@@ -468,8 +468,7 @@ void sendCustomStatusUpdate(const char* targetMachineId, bool isRunning, bool is
       Serial.print("]: ");
       Serial.println(httpResponseCode);
     } else {
-      Serial.printf("freeHeap=%u  maxAlloc=%u\n", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-http.begin(client, serverUrl);
+      //Serial.printf("freeHeap=%u  maxAlloc=%u\n", ESP.getFreeHeap(), ESP.getMaxAllocHeap()); //Was helpfull for testing, not enough power for bursts of ble or wifi, so we used Nim ble for less power
       Serial.print("❌ Transmission Error [");
       Serial.print(targetMachineId);
       Serial.print("]: ");
@@ -482,39 +481,6 @@ http.begin(client, serverUrl);
     Serial.println(targetMachineId);
   }
 }
-
-/*void sendCustomStatusUpdate(const char* targetMachineId, bool isRunning, bool isEmpty) {
-  if (WiFi.status() == WL_CONNECTED) {
-    HTTPClient http;
-
-    http.begin(serverUrl);
-    http.addHeader("Content-Type", "application/json");
-
-    // Properly escaped JSON string builder using the dynamic target profile parameters
-    String jsonPayload = "{\"machineId\":\"" + String(targetMachineId) + "\","
-                         "\"running\":" + (isRunning ? "true" : "false") + ","
-                         "\"empty\":" + (isEmpty ? "true" : "false") + "}";
-
-    int httpResponseCode = http.POST(jsonPayload);
-
-    if (httpResponseCode > 0) {
-      Serial.print("✅ Server Status [");
-      Serial.print(targetMachineId);
-      Serial.print("]: ");
-      Serial.println(httpResponseCode);
-    } else {
-      Serial.print("❌ Transmission Error [");
-      Serial.print(targetMachineId);
-      Serial.print("]: ");
-      Serial.println(httpResponseCode);
-    }
-
-    http.end();
-  } else {
-    Serial.print("❌ Network dropped: Deferred update payload for ");
-    Serial.println(targetMachineId);
-  }
-}*/
 
  void print_accels() {
   Serial.print(avg10);                 // Average activity (10 s)
