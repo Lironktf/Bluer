@@ -5,22 +5,28 @@
 #include <BLEAdvertising.h>
 
 // Custom tracking string for the washer
-#define WASHER_BLE_NAME "WASHER_A1"
-const char* machineId = "WASHER_NODE_A1"; 
+#define WASHER_BLE_NAME "WASHER_A1" //VARIES
+const char* machineId = "WASHER_NODE_A1"; //Doesnt  matter
 
 bool empty = true; //Two status booleans sent to website
 bool running = false;
 bool doorclosed = false;
 bool wasRunning = false;
 bool wasEmpty = true;
-bool lastIntakeHIGH = false;
-const int WINDOW = 200; // 200 samples × 25 ms = 5 second, used to make avg HIGH activity variable
+const int WINDOW = 200; // 200 samples × 25 ms = 5 second, considering other delays, more like 10s of averaging, used to make avg HIGH activity variable
 int idx = 0;
-int quiettime = 0;
 double HighFreqWindow [WINDOW];
 double AvgHighFreq = 0.0;
+double HighFreqWindow2 [WINDOW];
+double AvgHighFreq2 = 0.0;
 double lowmid = 0.0;
 double high = 0.0;
+double high2 = 0.0;
+unsigned long cycleEndsAt = 0;            // loops remaining in current cycle
+const unsigned long TIMER_FULL_MS   = 1500000UL;  // 25 min, start of cycle, WallClock, consistant timing
+const unsigned long TIMER_REFILL_MS = 630000UL;   // 10 min 30 s
+const double FIRST_FILL_HIGH2 = 200000;  // 9750–11625 band, starts the cycle
+const double REFILL_HIGH      = 58000;   // 7875–9750 band, this is a later water in, tops the timer back up
 unsigned long lastSendTime = 0;
 const unsigned long sendInterval = 300000; // 5 min
 
@@ -83,6 +89,7 @@ void setup() {
 
   for (int i = 0; i < WINDOW; i++) {
       HighFreqWindow[i] = 0.0;
+      HighFreqWindow2[i] = 0.0;
     }
 
   Serial.println("\n\n========================================");
@@ -99,12 +106,6 @@ void setup() {
 }
 
 void loop() {
-  if (running && !wasRunning){
-    Serial.println("▶️ Machine started running ✅");
-  }
-  else if (!running && wasRunning) {
-    Serial.println("🛑 Machine stopped");
-  }
 
   wasRunning = running;
   wasEmpty = empty;
@@ -125,22 +126,26 @@ void loop() {
   double binResolution = (double)SAMPLE_RATE / SAMPLES;
   
   double zone_lowmid = 0;  // 60Hz to 600Hz Door closed
-  double zone_high = 0;    // 6500Hz to 8000Hz Water in
+  double zone_high = 0;    // 7875 to 9750
+  double zone_high2 = 0;   // 9750 to 11625
 
-  int c_lowmid = 0, c_high = 0;
+  int c_lowmid = 0, c_high = 0, c_high2 = 0;
 
   for (int i = 2; i < (SAMPLES / 2); i++) {
     double freq = i * binResolution;
     
     if (freq >= 60 && freq < 600) { zone_lowmid += vReal[i]; c_lowmid++; }
-    else if (freq >= 6500 && freq < 7800) { zone_high += vReal[i]; c_high++; }
+    else if (freq >= 7875 && freq < 9750)  { zone_high  += vReal[i]; c_high++; }
+    else if (freq >= 9750 && freq < 11625) { zone_high2 += vReal[i]; c_high2++; }
   }
 
   // Calculate averages to keep the graph stable
   double prevlowmid = lowmid;
   lowmid = (c_lowmid > 0) ? (zone_lowmid / c_lowmid) : 0;
   high = (c_high > 0) ? (zone_high / c_high) : 0;
-  if ((prevlowmid > (lowmid + 180000)) && !running && !doorclosed){
+  high2 = (c_high2 > 0) ? (zone_high2 / c_high2) : 0;
+
+  if ((prevlowmid > (lowmid + 750000)) && !running && !doorclosed){
     doorclosed = true;
     empty = true;
     Serial.println("Door Closed! Now Empty");
@@ -149,46 +154,39 @@ void loop() {
   AvgHighFreq -= HighFreqWindow[idx];
   HighFreqWindow[idx] = high;
   AvgHighFreq += high;
+
+  AvgHighFreq2 -= HighFreqWindow2[idx];
+  HighFreqWindow2[idx] = high2;
+  AvgHighFreq2 += high2;
+
   idx = (idx + 1) % WINDOW;
 
   double actualAvgWater = AvgHighFreq / WINDOW;
+  double actualAvgWater2 = AvgHighFreq2 / WINDOW;
 
-  if (actualAvgWater > 100000){
-    lastIntakeHIGH = true;
-    Serial.print("HighIntake, 14 min break");
-  }
-
-  if (actualAvgWater > 23000){
+  if (!running && actualAvgWater2 > FIRST_FILL_HIGH2){
     running = true;
     empty = false;
     doorclosed = false;
-    
-    if (quiettime > 0 && actualAvgWater < 100000){
-      lastIntakeHIGH = false; //If we are starting a new water in cycle, after a break where it was < 23000, then break gets reset to normal
-      Serial.println("No more HighIntake, 11 min break");
+    cycleEndsAt = millis() + TIMER_FULL_MS; //Cycle will be done at current time + 25min
+    Serial.println("▶️ Cycle started (first fill detected)");
+  }
+
+  if (running){
+    if (actualAvgWater > REFILL_HIGH && (cycleEndsAt - millis() < TIMER_REFILL_MS)){ //If when its supposed to end minus time now is < 10 minutes, even if timer had already passed here, its unsigned, so would be false and wouldnt incorrectly add more time to timer
+      cycleEndsAt = millis() + TIMER_REFILL_MS; //Update end time
+      Serial.println("💧 Refill detected -> timer reset to 10 min 30 s");
     }
 
-    quiettime = 0;
-  }
-  else {
-    quiettime++;
-  }
-
-  int maximumQuietLoops = 16559; // Standard 11 minutes limit
-  if (lastIntakeHIGH) {
-    maximumQuietLoops = 21110; // Extended 14 minutes limit
-  }
-
-  if (quiettime >= maximumQuietLoops){
-    running = false;
-    lastIntakeHIGH = false;
-    quiettime = 0;         // Clean up counter tracking
-    Serial.println("🛑 Cycle ended automatically due to timeout.");
+    if ((long)(millis() - cycleEndsAt) >= 0){
+      running = false;
+      Serial.println("🛑 Cycle ended (timer expired)");
+    }
   }
 
   Serial.print("Door_60-600Hz:"); Serial.print(lowmid); Serial.print(",");
-  Serial.print("Water_6500-8000Hz:"); Serial.print(high); Serial.print(",");
-  Serial.print("AvgWaterIn5:"); Serial.println(actualAvgWater);
+  Serial.print("Avg_7875_9750:");   Serial.print(actualAvgWater);  Serial.print(",");
+  Serial.print("Avg_9750_11625:"); Serial.println(actualAvgWater2);
 
   // Send status update to server every 5 min
   unsigned long currentTime = millis();
