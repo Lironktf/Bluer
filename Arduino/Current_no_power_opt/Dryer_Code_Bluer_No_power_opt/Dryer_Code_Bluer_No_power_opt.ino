@@ -45,6 +45,7 @@ bool lastSentWasherEmpty = true;
 volatile bool washerChanged = false; // "volatile" ensures safe multi-threaded core operations
 unsigned long lastBleScanTime = 0;
 const unsigned long bleScanInterval = 20000; // 10 seconds total cycle time
+bool washerEverSent = false;
 
 NimBLEScan* pBLEScan;
 
@@ -73,7 +74,7 @@ float
   activities[WINDOWTWO], //Used to caluclates avg of last 15 seconds of activity
   deltastwo[WINDOWTHREE],
   activitysmallHistory[6], //Holds history of last six small acitivties to capture the small activity 0.3s ago (6 x 50ms)
-  DYRERONTHRESHHOLD = 4, //Thresholds
+  DYRERONTHRESHHOLD = 2.8, //Thresholds
   DOOROPENINGCHANGE = 0.45,
   DOORCLOSINGCHANGE = 0.9,
   avg10 = 0, //Average activity over last 15 seconds (easier way just always keep track of the average)
@@ -81,9 +82,9 @@ float
 ;
 
 // Machine identification and server configuration
-const char* machineId = "a1-m2"; // VARIES
+const char* machineId = "a1-m4"; // VARIES
 const char* serverUrl = "https://laun-dryer.vercel.app/api/machines";
-const char* washerMachineId = "a1-m1"; //VARIES
+const char* washerMachineId = "a1-m5"; //VARIES
 
 // Timing for sending updates (send every 5 seconds)
 unsigned long lastSendTime = 0;
@@ -91,19 +92,20 @@ const unsigned long sendInterval = 300000; // 5 min
 
 class MyAdvertisedDeviceCallbacks: public NimBLEScanCallbacks {
     void onResult(const NimBLEAdvertisedDevice* advertisedDevice) override {
-      if (advertisedDevice->getName() == "WASHER_A1") { //VARIES
+      if (advertisedDevice->getName() == "WASHER_A3") { //VARIES
         std::string data = advertisedDevice->getManufacturerData();
 
         if (data.length() >= 2) {
           bool currentWasherRunning = (data[0] == '1');
           bool currentWasherEmpty  = (data[1] == '1');
 
-          if (currentWasherRunning != lastSentWasherRunning || currentWasherEmpty != lastSentWasherEmpty) {
+          if (!washerEverSent || currentWasherRunning != lastSentWasherRunning || currentWasherEmpty != lastSentWasherEmpty) {
+            washerEverSent = true;
             washerRunning = currentWasherRunning;
             washerEmpty = currentWasherEmpty;
             lastSentWasherRunning = currentWasherRunning;
             lastSentWasherEmpty = currentWasherEmpty;
-            Serial.println("\n➔ [BLE Event] Washer state shifted! Routing directly to Vercel...");
+            Serial.printf("\n➔ [BLE Event] Washer %s state shifted! Routing to Vercel...\n", washerMachineId);
             washerChanged = true;
           }
         }
@@ -356,7 +358,7 @@ void loop() {
   if (currentTime - lastBleScanTime >= bleScanInterval) {
     lastBleScanTime = currentTime;
     
-    Serial.println("[BLE] Sniffing the air for washer updates...");
+    Serial.printf("[BLE] Sniffing the air for washer %s updates...\n", washerMachineId);
     
     // Scans for exactly 2 seconds, runs your callback if a packet is found, then stops
     pBLEScan->start(2000, false);   // 2000 ms = 2 seconds
@@ -370,7 +372,7 @@ void loop() {
     // WASHER NETWORK ROUTER: Handles the washer network transmission safely on main thread time
   if (washerChanged) {
     washerChanged = false; // Reset flag instantly to prevent duplicate triggers
-    Serial.println("\n➔ [Dryer Router] Handling deferred Washer payload trigger safely on loop timeline...");
+    Serial.printf("\n➔ [Dryer Router] Handling deferred payload for washer %s...\n", washerMachineId);
     sendCustomStatusUpdate(washerMachineId, washerRunning, washerEmpty);
   }
 
@@ -482,14 +484,7 @@ void sendCustomStatusUpdate(const char* targetMachineId, bool isRunning, bool is
   }
 }
 
- void print_accels() {
-  Serial.print(avg10);                 // Average activity (10 s)
-  Serial.print('\t');
-  Serial.print(activitysmall);         // Short-term activity
-  Serial.print('\t');
-  Serial.print(mpu_a_mag);             // Raw acceleration magnitude
-  Serial.print('\t');
-  Serial.print(running ? 1 : 0);       // Running
-  Serial.print('\t');
-  Serial.println(empty ? 1 : 0);       // Empty + end of line
+void print_accels() {
+  Serial.print("Avg10:"); Serial.print(avg10); Serial.print(",");
+  Serial.print("ActivitySmall:"); Serial.println(activitysmall);
 }
