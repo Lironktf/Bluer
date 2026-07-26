@@ -5,7 +5,7 @@
 #include <BLEAdvertising.h>
 
 // Custom tracking string for the washer
-#define WASHER_BLE_NAME "WASHER_A1" //VARIES
+#define WASHER_BLE_NAME "WASHER_A3" //VARIES
 const char* machineId = "WASHER_NODE_A1"; //Doesnt  matter
 
 bool empty = true; //Two status booleans sent to website
@@ -24,9 +24,9 @@ double high = 0.0;
 double high2 = 0.0;
 unsigned long cycleEndsAt = 0;            // loops remaining in current cycle
 const unsigned long TIMER_FULL_MS   = 1500000UL;  // 25 min, start of cycle, WallClock, consistant timing
-const unsigned long TIMER_REFILL_MS = 630000UL;   // 10 min 30 s
+const unsigned long TIMER_REFILL_MS = 630000UL;   // 10 min 30 s Very accurate timing, perfect for at least the rightmost washer in tests
 const double FIRST_FILL_HIGH2 = 200000;  // 9750–11625 band, starts the cycle
-const double REFILL_HIGH      = 58000;   // 7875–9750 band, this is a later water in, tops the timer back up
+const double REFILL_HIGH      = 54000;   // 7875–9750 band, this is a later water in, tops the timer back up
 unsigned long lastSendTime = 0;
 const unsigned long sendInterval = 300000; // 5 min
 
