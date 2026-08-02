@@ -25,8 +25,11 @@ double high2 = 0.0;
 unsigned long cycleEndsAt = 0;            // loops remaining in current cycle
 const unsigned long TIMER_FULL_MS   = 1500000UL;  // 25 min, start of cycle, WallClock, consistant timing
 const unsigned long TIMER_REFILL_MS = 630000UL;   // 10 min 30 s Very accurate timing, perfect for at least the rightmost washer in tests
-const double FIRST_FILL_HIGH2 = 200000;  // 9750–11625 band, starts the cycle
-const double REFILL_HIGH      = 54000;   // 7875–9750 band, this is a later water in, tops the timer back up
+const double FIRST_FILL_HIGH2 = 180000;  // either band, starts the cycle
+const double REFILL_HIGH      = 31000;   // 7875–9750 band, this is a later water in, tops the timer back up
+//For above, M1 max from machine next is 45000, test if all the water ins are above this day of installation
+unsigned long cycleStartedAt = 0;                 // when the current cycle began
+const unsigned long MAX_CYCLE_MS = 2520000UL;     // 42 min hard cap
 unsigned long lastSendTime = 0;
 const unsigned long sendInterval = 300000; // 5 min
 
@@ -164,23 +167,31 @@ void loop() {
   double actualAvgWater = AvgHighFreq / WINDOW;
   double actualAvgWater2 = AvgHighFreq2 / WINDOW;
 
-  if (!running && actualAvgWater2 > FIRST_FILL_HIGH2){
+  if (!running && (actualAvgWater2 > FIRST_FILL_HIGH2 || actualAvgWater > FIRST_FILL_HIGH2)){
     running = true;
     empty = false;
     doorclosed = false;
+    cycleStartedAt = millis();
     cycleEndsAt = millis() + TIMER_FULL_MS; //Cycle will be done at current time + 25min
     Serial.println("▶️ Cycle started (first fill detected)");
   }
 
   if (running){
-    if (actualAvgWater > REFILL_HIGH && (cycleEndsAt - millis() < TIMER_REFILL_MS)){ //If when its supposed to end minus time now is < 10 minutes, even if timer had already passed here, its unsigned, so would be false and wouldnt incorrectly add more time to timer
-      cycleEndsAt = millis() + TIMER_REFILL_MS; //Update end time
-      Serial.println("💧 Refill detected -> timer reset to 10 min 30 s");
-    }
-
-    if ((long)(millis() - cycleEndsAt) >= 0){
+    // Hard ceiling: no cycle runs longer than 42 min, no matter how many refills fired
+    if ((long)(millis() - cycleStartedAt) >= (long)MAX_CYCLE_MS){
       running = false;
-      Serial.println("🛑 Cycle ended (timer expired)");
+      Serial.println("🛑 Cycle force-ended (42 min hard cap reached)");
+    }
+    else {
+      if (actualAvgWater > REFILL_HIGH && (cycleEndsAt - millis() < TIMER_REFILL_MS)){ //If when its supposed to end minus time now is < 10 minutes, even if timer had already passed here, its unsigned, so would be false and wouldnt incorrectly add more time to timer
+        cycleEndsAt = millis() + TIMER_REFILL_MS; //Update end time
+        Serial.println("💧 Refill detected -> timer reset to 10 min 30 s");
+      }
+
+      if ((long)(millis() - cycleEndsAt) >= 0){
+        running = false;
+        Serial.println("🛑 Cycle ended (timer expired)");
+      }
     }
   }
 
