@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { track } from '@vercel/analytics';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import MachineGrid from '../components/MachineGrid/MachineGrid';
 import SummaryBar from '../components/SummaryBar/SummaryBar';
@@ -158,6 +159,14 @@ export default function Dashboard() {
     }
   }, [selectedRoom, lastRoomName, setLastRoomName]);
 
+  // Which rooms actually get traffic. Page views alone cannot answer this:
+  // the room lives in a ?room= query param, which analytics strips from paths.
+  useEffect(() => {
+    if (selectedRoom?.name) {
+      track('room_viewed', { room: selectedRoom.name });
+    }
+  }, [selectedRoom?.name]);
+
   // Every slot the room is configured to have, whether or not a sensor exists.
   const machines = useMemo(() => {
     if (!selectedRoom) return [];
@@ -181,6 +190,8 @@ export default function Dashboard() {
         if (!response.ok || !data?.success) {
           throw new Error(data?.error || `Report failed (${response.status})`);
         }
+
+        track('machine_reported', { type, machine: machineId, flagged: Boolean(data.flagged) });
 
         await refresh();
       } catch (error) {

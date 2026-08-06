@@ -24,14 +24,16 @@
   }
 }
 
-/* ---- status ---- */
+/* ---- status ----
+   Colour reflects whether you can use the machine, not what it is doing:
+   running = occupied = red, not running = free to walk up to = green. */
 
 .running {
-  border-left-color: var(--color-running);
+  border-left-color: var(--color-in-use);
 }
 
 .idle {
-  border-left-color: var(--color-idle);
+  border-left-color: var(--color-available);
 }
 
 /* A slot no sensor has ever reported for. Collapses to one quiet line so six
@@ -130,15 +132,15 @@
 }
 
 .reportButton:hover:not(:disabled) {
-  color: var(--color-idle);
+  color: var(--color-red);
 }
 
 .fixButton {
-  color: var(--color-running);
+  color: var(--color-green);
 }
 
 .fixButton:hover:not(:disabled) {
-  color: var(--color-running-dark);
+  color: var(--color-green-dark);
 }
 
 .reportButton:disabled,
