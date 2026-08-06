@@ -1,113 +1,38 @@
-import { useState, useRef, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import AuthModal from '../Auth/AuthModal';
+import { Link, useLocation } from 'react-router-dom';
 import styles from './Navigation.module.css';
 
+// Accounts are not surfaced in the UI right now. The auth backend, AuthContext,
+// AuthModal and the /my-rooms page all still exist -- adding a link back here is
+// all it takes to bring them back.
+const LINKS = [
+  { to: '/', label: 'Rooms' },
+  { to: '/about', label: 'About' },
+];
+
 export default function Navigation() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const navRef = useRef(null);
-  const { user, isAuthenticated, logout } = useAuth();
-
-  const toggleMenu = () => {
-    setIsOpen(!isOpen);
-  };
-
-  const handleLogout = () => {
-    logout();
-    setIsOpen(false);
-  };
-
-  const handleLoginClick = () => {
-    setShowAuthModal(true);
-    setIsOpen(false);
-  };
-
-  // Close menu when clicking outside
-  useEffect(() => {
-    function handleClickOutside(event) {
-      if (navRef.current && !navRef.current.contains(event.target)) {
-        setIsOpen(false);
-      }
-    }
-
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isOpen]);
+  const { pathname } = useLocation();
 
   return (
-    <>
-      <nav className={styles.nav} ref={navRef}>
-        {/* Hamburger button */}
-        <button
-          className={styles.hamburger}
-          onClick={toggleMenu}
-          aria-label="Toggle menu"
-        >
-          <span className={styles.line}></span>
-          <span className={styles.line}></span>
-          <span className={styles.line}></span>
-        </button>
+    <div className={styles.wrap}>
+      <header className={styles.bar}>
+        <Link to="/" className={styles.brand}>
+          <img src="/favicon.png" alt="" className={styles.mark} width="28" height="28" />
+          <span className={styles.wordmark}>Bluer</span>
+        </Link>
 
-        {/* Menu buttons that appear when open */}
-        {isOpen && (
-          <div className={styles.menuButtons}>
+        <nav className={styles.links} aria-label="Main">
+          {LINKS.map((link) => (
             <Link
-              to="/about"
-              className={styles.menuButton}
-              onClick={() => setIsOpen(false)}
+              key={link.to}
+              to={link.to}
+              className={`${styles.link} ${pathname === link.to ? styles.active : ''}`}
+              aria-current={pathname === link.to ? 'page' : undefined}
             >
-              About
+              {link.label}
             </Link>
-            <Link
-              to="/"
-              className={styles.menuButton}
-              onClick={() => setIsOpen(false)}
-            >
-              Rooms
-            </Link>
-
-            {/* User section */}
-            <div className={styles.userSection}>
-              {isAuthenticated ? (
-                <>
-                  <Link
-                    to="/my-rooms"
-                    className={styles.menuButton}
-                    onClick={() => setIsOpen(false)}
-                  >
-                    My Rooms
-                  </Link>
-                  <div className={styles.userInfo}>
-                    <span className={styles.username}>{user.displayName}</span>
-                    <button
-                      onClick={handleLogout}
-                      className={styles.logoutButton}
-                    >
-                      Logout
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <button
-                  onClick={handleLoginClick}
-                  className={styles.loginButton}
-                >
-                  Login / Sign Up
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-      </nav>
-
-      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
-    </>
+          ))}
+        </nav>
+      </header>
+    </div>
   );
 }

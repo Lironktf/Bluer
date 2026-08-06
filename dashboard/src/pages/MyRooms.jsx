@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import Navigation from '../components/Navigation/Navigation';
 import AuthModal from '../components/Auth/AuthModal';
 import RoomSelector from '../components/RoomSelector/RoomSelector';
 import Cookies from 'js-cookie';
@@ -121,7 +120,6 @@ export default function MyRooms() {
   if (authLoading || loading) {
     return (
       <>
-        <Navigation />
         <div className="my-rooms-page">
           <div className="loading">Loading...</div>
         </div>
@@ -132,7 +130,6 @@ export default function MyRooms() {
   if (!isAuthenticated) {
     return (
       <>
-        <Navigation />
         <div className="my-rooms-page">
           <div className="not-logged-in">
             <h2>My Rooms</h2>
@@ -153,7 +150,6 @@ export default function MyRooms() {
 
   return (
     <>
-      <Navigation />
       <div className="my-rooms-page">
         <div className="my-rooms-header">
           <div>

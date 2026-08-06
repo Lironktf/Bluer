@@ -1,61 +1,100 @@
 import { useState } from 'react';
-import StatusBadge from '../StatusBadge/StatusBadge';
 import ConfirmDialog from '../ConfirmDialog/ConfirmDialog';
+import { WasherIcon, DryerIcon, WrenchIcon, CheckIcon } from '../Icons/MachineIcons';
+import { WASHER, formatAge } from '../../utils/machineLabel';
 import styles from './MachineCard.module.css';
 
-export default function MachineCard({ machine, isBroken, onReport }) {
-  const [showConfirm, setShowConfirm] = useState(false);
+function formatReturnDate(date) {
+  if (!date) return null;
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 
-  const handleReportClick = () => {
-    setShowConfirm(true);
-  };
+export default function MachineCard({ machine, onReportBroken, onReportFixed, isPending }) {
+  const [confirming, setConfirming] = useState(null); // 'broken' | 'fixed' | null
+
+  const TypeIcon = machine.type === WASHER ? WasherIcon : DryerIcon;
+  const { hasSensor, isFresh, isRunning, isEmpty, flagged } = machine;
+
+  // No sensor has ever reported for this slot. Nothing to show, so it collapses
+  // to a single quiet line rather than occupying a full card.
+  if (!hasSensor) {
+    return (
+      <div className={styles.placeholder}>
+        <span className={styles.placeholderName}>{machine.label}</span>
+        <span className={styles.placeholderNote}>No sensor</span>
+      </div>
+    );
+  }
 
   const handleConfirm = () => {
-    onReport(machine.id);
-    setShowConfirm(false);
-  };
-
-  const handleCancel = () => {
-    setShowConfirm(false);
+    if (confirming === 'broken') onReportBroken(machine.id);
+    if (confirming === 'fixed') onReportFixed(machine.id);
+    setConfirming(null);
   };
 
   return (
     <>
-      {showConfirm && (
+      {confirming && (
         <ConfirmDialog
-          message={`Report Machine ${machine.number} as broken?`}
+          message={
+            confirming === 'broken'
+              ? `Report ${machine.label} as broken?`
+              : `Report ${machine.label} as working again?`
+          }
           onConfirm={handleConfirm}
-          onCancel={handleCancel}
+          onCancel={() => setConfirming(null)}
         />
       )}
-      <div className={`${styles.card} ${isBroken ? styles.broken : ''}`}>
-        <button
-          className={styles.reportButton}
-          onClick={handleReportClick}
-          aria-label="Report machine as broken"
-        >
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
-          </svg>
-        </button>
 
-        <div className={styles.machineNumber}>Machine {machine.number}</div>
-
-        <div className={styles.statusContainer}>
-          <div className={styles.statusText}>
-            Status: <span className={styles.statusValue}>{machine.isRunning ? 'Running' : 'Not Running'}</span>
-          </div>
-          <StatusBadge label={machine.isEmpty ? "Empty" : "Full"} isActive={machine.isEmpty} />
+      <div
+        className={`${styles.card} ${isRunning ? styles.running : styles.idle} ${
+          flagged ? styles.flagged : ''
+        }`}
+        aria-label={`${machine.label}, ${isRunning ? 'running' : 'not running'}, ${
+          isEmpty ? 'empty' : 'full'
+        }`}
+      >
+        <div className={styles.head}>
+          <span className={styles.name}>{machine.label}</span>
+          <TypeIcon className={styles.typeIcon} />
         </div>
+
+        <div className={styles.status}>{isRunning ? 'Running' : 'Not running'}</div>
+
+        <div className={styles.fill}>
+          {isEmpty ? 'Empty' : 'Full'}
+          {/* Older than the fresh window: still the machine's real last known
+              state, just flagged with its age so nobody over-trusts it. */}
+          {!isFresh && <span className={styles.age}>{formatAge(machine.ageMs)} ago</span>}
+        </div>
+
+        {flagged ? (
+          <div className={styles.flagBlock}>
+            <p className={styles.flagNote}>
+              Reported broken
+              {machine.flaggedUntil && ` · until ${formatReturnDate(machine.flaggedUntil)}`}
+            </p>
+            <button
+              type="button"
+              className={styles.fixButton}
+              onClick={() => setConfirming('fixed')}
+              disabled={isPending}
+            >
+              <CheckIcon className={styles.actionIcon} />
+              Works again ({machine.fixedCount}/3)
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className={styles.reportButton}
+            onClick={() => setConfirming('broken')}
+            disabled={isPending}
+          >
+            <WrenchIcon className={styles.actionIcon} />
+            {machine.brokenCount > 0 ? `Broken (${machine.brokenCount}/3)` : 'Report broken'}
+          </button>
+        )}
       </div>
     </>
   );

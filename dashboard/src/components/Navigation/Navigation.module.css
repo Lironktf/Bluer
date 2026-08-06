@@ -1,145 +1,102 @@
-.nav {
-  position: fixed;
-  top: 1rem;
-  left: 1rem;
-  z-index: 100;
+/* Floating "pillbox": the bar sits inset from every edge and casts a shadow, so
+   it reads as hovering above the dotted background rather than being welded to
+   the top of the page. Width matches the page content so the two line up. */
+.wrap {
+  padding: 0.75rem;
 }
 
 @media (min-width: 768px) {
-  .nav {
-    top: 1.5rem;
-    left: 1.5rem;
+  .wrap {
+    padding: 1rem 1.5rem 0.5rem;
   }
 }
 
-/* Hamburger button */
-.hamburger {
+.bar {
   display: flex;
-  flex-direction: column;
-  gap: 5px;
-  background-color: white;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 0.75rem;
-  cursor: pointer;
-  transition: var(--transition);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.hamburger:hover {
-  background-color: var(--color-hover-bg);
-  border-color: var(--color-text-tertiary);
-}
-
-.line {
-  width: 24px;
-  height: 2px;
-  background-color: var(--color-text-primary);
-  border-radius: 2px;
-  transition: var(--transition);
-}
-
-/* Menu buttons container */
-.menuButtons {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 0.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  animation: slideIn 0.4s ease-out;
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.menuButton {
-  display: block;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
   width: 100%;
-  padding: 0.875rem 1.5rem;
-  background-color: white;
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 0.4375rem 0.5rem 0.4375rem 0.6875rem;
+  background-color: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  color: var(--color-text-primary);
+  border-radius: 999px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 6px 20px -6px rgba(0, 0, 0, 0.12);
+}
+
+@media (min-width: 768px) {
+  .bar {
+    padding: 0.5rem 0.625rem 0.5rem 0.875rem;
+  }
+}
+
+/* ---- brand ---- */
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
   text-decoration: none;
-  font-size: 1rem;
-  font-weight: 400;
-  transition: all var(--transition);
-  white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  text-align: left;
-  cursor: pointer;
 }
 
-.menuButton:hover {
-  background-color: var(--color-hover-bg);
-  border-color: var(--color-text-tertiary);
-  transform: translateX(4px);
+.mark {
+  display: block;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  object-fit: cover;
 }
 
-/* User section */
-.userSection {
-  margin-top: 0.5rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--color-border);
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.userInfo {
-  background-color: white;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 0.875rem 1.5rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.username {
-  font-weight: 600;
+.wordmark {
+  font-size: 0.875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  line-height: 1;
   color: var(--color-text-primary);
-  font-size: 0.95rem;
+  white-space: nowrap;
 }
 
-.loginButton,
-.logoutButton {
-  padding: 0.875rem 1.5rem;
-  background-color: white;
-  color: black;
-  border: 1px solid black; /* Adding a border for visibility */
-  border-radius: var(--radius);
-  font-size: 1rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all var(--transition);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+@media (min-width: 768px) {
+  .wordmark {
+    font-size: 0.9375rem;
+  }
 }
 
-.loginButton:hover {
-  background-color: #eee;
-  transform: translateX(4px);
+/* ---- links ---- */
+
+.links {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  flex-shrink: 0;
 }
 
-.logoutButton {
-  background-color: white;
-  color: black;
-  border: 1px solid black; /* Adding a border for visibility */
-  font-size: 0.9rem;
-  padding: 0.5rem 1rem;
+.link {
+  padding: 0.4375rem 0.875rem;
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-weight: var(--font-medium);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    color var(--transition),
+    background-color var(--transition);
 }
 
-.logoutButton:hover {
-  background-color: #eee;
+.link:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-hover-bg);
+}
+
+.active {
+  color: var(--color-text-primary);
+  background-color: var(--color-hover-bg);
 }

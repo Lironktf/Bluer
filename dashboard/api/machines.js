@@ -29,8 +29,16 @@ function getRoomFromMachineId(machineId) {
   return areaToRoomMap[prefix] || null;
 }
 
-// Machine goes offline if not updated in 2 minutes
-const OFFLINE_TIMEOUT_MS = 2 * 60 * 1000;
+// Machine goes offline if it misses several heartbeats.
+//
+// This MUST stay comfortably above the firmware's sendInterval (300000 ms, see
+// Arduino/.../Dryer_Code_Bluer_No_power_opt.ino). It was previously 2 minutes,
+// which is shorter than the 5 minute heartbeat -- healthy machines were marked
+// offline for 3 of every 5 minutes, and each GET wrote a spurious
+// "went_offline" history record (~288 per machine per day).
+const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
+const MISSED_HEARTBEATS_BEFORE_OFFLINE = 3;
+const OFFLINE_TIMEOUT_MS = HEARTBEAT_INTERVAL_MS * MISSED_HEARTBEATS_BEFORE_OFFLINE;
 
 export default async function handler(req, res) {
   // Enable CORS
