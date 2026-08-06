@@ -21,10 +21,16 @@
   --color-text-light: #9a9a9a;
   --color-border: #e2e2e0;
 
-  /* Machine status. Green = running, red = not running. */
-  --color-running: #22c55e;
-  --color-running-dark: #15803d;
-  --color-idle: #ef4444;
+  /* Palette */
+  --color-green: #22c55e;
+  --color-green-dark: #15803d;
+  --color-red: #ef4444;
+
+  /* Machine status, from the user's point of view rather than the machine's:
+     green means you can walk up and use it, red means you cannot. */
+  --color-available: var(--color-green);
+  --color-available-dark: var(--color-green-dark);
+  --color-in-use: var(--color-red);
 
   /* Reported-broken treatment */
   --color-flag-bg: #fffbeb;
