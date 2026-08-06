@@ -1,117 +1,120 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import Navigation from '../components/Navigation/Navigation';
 import MachineGrid from '../components/MachineGrid/MachineGrid';
+import SummaryBar from '../components/SummaryBar/SummaryBar';
 import RoomSearchAutocomplete from '../components/RoomSearchAutocomplete/RoomSearchAutocomplete';
+import { buildRoomSlots, roomPrefix } from '../utils/machineLabel';
+import { getDeviceId } from '../utils/deviceId';
 import styles from './Dashboard.module.css';
-import Cookies from 'js-cookie';
 
-const BACKEND_URL = 'https://laun-dryer.vercel.app';
-// Default room to preload on first load (must match a room.name from the DB)
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://laun-dryer.vercel.app';
+
+// Used the first time someone visits, before they have picked a room.
 const DEFAULT_ROOM_NAME = 'SJU-Sieg/Ryan';
+
+const POLL_INTERVAL_MS = 5000;
+
+/**
+ * Fetch JSON, returning null instead of throwing on anything unexpected.
+ *
+ * The SPA rewrite in vercel.json serves index.html for unmatched paths, so an
+ * endpoint that is not deployed yet answers 200 with HTML rather than a 404.
+ * Parsing that blindly throws on every poll.
+ */
+async function fetchJson(url) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) return null;
+
+    return await response.json();
+  } catch (error) {
+    console.error(`Request to ${url} failed:`, error);
+    return null;
+  }
+}
+
+function matchesRoom(room, searchLower) {
+  return (
+    room.name.toLowerCase().includes(searchLower) ||
+    (room.building && room.building.toLowerCase().includes(searchLower)) ||
+    (room.floor && room.floor.toLowerCase().includes(searchLower))
+  );
+}
 
 export default function Dashboard() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // State for broken machines (persisted in localStorage)
-  const [brokenMachines, setBrokenMachines] = useLocalStorage('brokenMachines', {});
-
-  // State for machine statuses from backend
   const [machineStatuses, setMachineStatuses] = useState({});
-
-  // State for rooms
+  const [reportState, setReportState] = useState({});
   const [rooms, setRooms] = useState([]);
   const [roomsLoading, setRoomsLoading] = useState(true);
-
-  // State for last update time
   const [lastUpdate, setLastUpdate] = useState(null);
+  const [pendingIds, setPendingIds] = useState(() => new Set());
 
-  // State for loading indicator
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  // Remember the room across visits so the site opens on the one you use.
+  const [lastRoomName, setLastRoomName] = useLocalStorage('lastRoomName', '');
 
-  // State for search/filter (now searches rooms)
-  // Initialize from URL params or location state
   const [searchTerm, setSearchTerm] = useState(() => {
     const params = new URLSearchParams(location.search);
     return params.get('room') || location.state?.roomName || '';
   });
 
-  // Update search term when location state changes (from MyRooms navigation)
+  // Navigation from another page (e.g. a room card) carries the room in state.
   useEffect(() => {
     if (location.state?.roomName && location.state.roomName !== searchTerm) {
       setSearchTerm(location.state.roomName);
-      // Clear the state to avoid re-triggering
       navigate(location.pathname, { replace: true, state: {} });
     }
   }, [location.state]);
 
-  // Fetch machine statuses from backend
-  useEffect(() => {
-    const fetchStatuses = async () => {
-      try {
-        setIsRefreshing(true);
-        console.log('🔍 Fetching machine statuses from:', `${BACKEND_URL}/api/machines`);
-        const response = await fetch(`${BACKEND_URL}/api/machines`);
-        const data = await response.json();
+  const refresh = useCallback(async () => {
+    const [machineData, reportData] = await Promise.all([
+      fetchJson(`${API_BASE_URL}/api/machines`),
+      fetchJson(`${API_BASE_URL}/api/reports`),
+    ]);
 
-        console.log('📦 Received data:', data);
+    if (machineData?.success) {
+      setMachineStatuses(machineData.machines);
+      setLastUpdate(new Date());
+    }
 
-        if (data.success) {
-          console.log('✅ Machine statuses:', data.machines);
-          setMachineStatuses(data.machines);
-          setLastUpdate(new Date());
-        }
-      } catch (error) {
-        console.error('❌ Error fetching machine statuses:', error);
-      } finally {
-        setIsRefreshing(false);
-      }
-    };
-
-    // Fetch immediately
-    fetchStatuses();
-
-    // Then fetch every 5 seconds
-    const interval = setInterval(fetchStatuses, 5000);
-
-    return () => clearInterval(interval);
+    // Reports are additive: if the endpoint is unavailable the dashboard still
+    // shows live machine status, just without any broken-report annotations.
+    if (reportData?.success) {
+      setReportState(reportData.reports || {});
+    }
   }, []);
 
-  // Fetch rooms for search - always use public rooms (no auth required)
+  useEffect(() => {
+    refresh();
+    const interval = setInterval(refresh, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [refresh]);
+
+  // Room list is public -- search works with or without an account.
   useEffect(() => {
     const fetchRooms = async () => {
       setRoomsLoading(true);
       try {
-        // Always use publicRooms endpoint so search works logged in or out
-        let uniqueRooms = [];
-        try {
-          const publicResp = await fetch(`${BACKEND_URL}/api/publicRooms`);
-          if (publicResp.ok) {
-            const data = await publicResp.json();
-            uniqueRooms = data.rooms || [];
-            console.log('📦 Loaded', uniqueRooms.length, 'public rooms for search');
-          } else {
-            console.error('❌ /api/publicRooms failed with status', publicResp.status);
-          }
-        } catch (error) {
-          console.error('❌ Error fetching /api/publicRooms:', error);
-        }
+        const data = await fetchJson(`${API_BASE_URL}/api/publicRooms`);
+        const loaded = data?.rooms || [];
+        setRooms(loaded);
 
-        setRooms(uniqueRooms);
-
-        // Preload default room (or first room) if no search term is set and no URL param
-        const urlParams = new URLSearchParams(location.search);
-        const urlRoom = urlParams.get('room');
-        if (uniqueRooms.length > 0 && !searchTerm && !urlRoom && !location.state?.roomName) {
-          // Try to find the configured default room by name
-          const preferred = uniqueRooms.find(r => r.name === DEFAULT_ROOM_NAME) || uniqueRooms[0];
-          console.log('🏠 Preloading room:', preferred.name);
+        const urlRoom = new URLSearchParams(location.search).get('room');
+        if (loaded.length > 0 && !searchTerm && !urlRoom && !location.state?.roomName) {
+          const preferred =
+            loaded.find((r) => r.name === lastRoomName) ||
+            loaded.find((r) => r.name === DEFAULT_ROOM_NAME) ||
+            loaded[0];
           setSearchTerm(preferred.name);
         }
       } catch (error) {
-        console.error('❌ Error fetching rooms:', error);
+        console.error('Failed to load rooms:', error);
       } finally {
         setRoomsLoading(false);
       }
@@ -120,24 +123,7 @@ export default function Dashboard() {
     fetchRooms();
   }, []);
 
-  // Convert backend data to machine array (only show machines that have reported)
-  const allMachines = Object.keys(machineStatuses).map(machineId => {
-    const status = machineStatuses[machineId];
-
-    // Extract machine number from ID (e.g., "a1-m3" -> number: 3)
-    const numberMatch = machineId.match(/m(\d+)$/);
-    const number = numberMatch ? parseInt(numberMatch[1]) : 0;
-
-    return {
-      id: machineId,
-      number: number,
-      isRunning: status.running,
-      isEmpty: status.empty,
-      room: status.room || null, // Room name from machines API
-    };
-  });
-
-  // Update URL when search term changes
+  // Keep ?room= in sync so the view is linkable.
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (searchTerm) {
@@ -145,75 +131,146 @@ export default function Dashboard() {
     } else {
       params.delete('room');
     }
-    const newSearch = params.toString();
-    const newUrl = newSearch ? `${location.pathname}?${newSearch}` : location.pathname;
-    if (newUrl !== location.pathname + location.search) {
-      navigate(newUrl, { replace: true });
+    const query = params.toString();
+    const nextUrl = query ? `${location.pathname}?${query}` : location.pathname;
+    if (nextUrl !== location.pathname + location.search) {
+      navigate(nextUrl, { replace: true });
     }
-  }, [searchTerm, location.pathname, navigate]);
+  }, [searchTerm, location.pathname, location.search, navigate]);
 
-  // Filter machines based on room search
-  let machines = allMachines;
-  if (searchTerm && rooms.length > 0) {
-    const searchLower = searchTerm.toLowerCase();
-    
-    // Find rooms that match the search term (same filtering as RoomSelector)
-    const matchingRooms = rooms.filter(room => {
+  // Resolve the search box down to a single room. An exact name match wins
+  // (that is what selecting from the dropdown produces); otherwise a search
+  // that narrows to exactly one room counts as a selection.
+  const selectedRoom = useMemo(() => {
+    if (!searchTerm || rooms.length === 0) return null;
+
+    const searchLower = searchTerm.trim().toLowerCase();
+    const exact = rooms.find((room) => room.name.toLowerCase() === searchLower);
+    if (exact) return exact;
+
+    const matches = rooms.filter((room) => matchesRoom(room, searchLower));
+    return matches.length === 1 ? matches[0] : null;
+  }, [searchTerm, rooms]);
+
+  useEffect(() => {
+    if (selectedRoom && selectedRoom.name !== lastRoomName) {
+      setLastRoomName(selectedRoom.name);
+    }
+  }, [selectedRoom, lastRoomName, setLastRoomName]);
+
+  // Every slot the room is configured to have, whether or not a sensor exists.
+  const machines = useMemo(() => {
+    if (!selectedRoom) return [];
+    return buildRoomSlots(selectedRoom.name, machineStatuses, reportState);
+  }, [selectedRoom, machineStatuses, reportState]);
+
+  const sendReport = useCallback(
+    async (machineId, type) => {
+      setPendingIds((prev) => new Set(prev).add(machineId));
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/reports`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ machineId, type, deviceId: getDeviceId() }),
+        });
+
+        const contentType = response.headers.get('content-type') || '';
+        const data = contentType.includes('application/json') ? await response.json() : null;
+
+        if (!response.ok || !data?.success) {
+          throw new Error(data?.error || `Report failed (${response.status})`);
+        }
+
+        await refresh();
+      } catch (error) {
+        console.error('Failed to submit report:', error);
+      } finally {
+        setPendingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(machineId);
+          return next;
+        });
+      }
+    },
+    [refresh]
+  );
+
+  const handleReportBroken = useCallback((id) => sendReport(id, 'broken'), [sendReport]);
+  const handleReportFixed = useCallback((id) => sendReport(id, 'fixed'), [sendReport]);
+
+  const renderBody = () => {
+    if (roomsLoading) {
+      return <p className={styles.emptyText}>Loading rooms…</p>;
+    }
+
+    if (rooms.length === 0) {
       return (
-        room.name.toLowerCase().includes(searchLower) ||
-        (room.building && room.building.toLowerCase().includes(searchLower)) ||
-        (room.floor && room.floor.toLowerCase().includes(searchLower))
+        <div className={styles.empty}>
+          <h2 className={styles.emptyTitle}>No rooms available</h2>
+          <p className={styles.emptyText}>Could not load the room list. Try again shortly.</p>
+        </div>
       );
-    });
+    }
 
-    console.log('🔍 Search term:', searchTerm);
-    console.log('📦 Total rooms available:', rooms.length);
-    console.log('🏠 Matching rooms:', matchingRooms.map(r => ({ name: r.name })));
+    if (!selectedRoom) {
+      return (
+        <div className={styles.empty}>
+          <h2 className={styles.emptyTitle}>
+            {searchTerm ? 'Pick a room' : 'Choose a room'}
+          </h2>
+          <p className={styles.emptyText}>
+            {searchTerm
+              ? `More than one room matches “${searchTerm}”. Select one from the list.`
+              : 'Search above to see live machine status.'}
+          </p>
+          {searchTerm && (
+            <button type="button" className={styles.textButton} onClick={() => setSearchTerm('')}>
+              Clear search
+            </button>
+          )}
+        </div>
+      );
+    }
 
-    // Build set of matching room names
-    const matchingRoomNames = new Set(matchingRooms.map(r => r.name));
+    if (!roomPrefix(selectedRoom.name)) {
+      return (
+        <div className={styles.empty}>
+          <h2 className={styles.emptyTitle}>{selectedRoom.name} is not set up yet</h2>
+          <p className={styles.emptyText}>No machines have been configured for this room.</p>
+        </div>
+      );
+    }
 
-    // Filter machines whose room (from machines API) matches one of the rooms
-    machines = allMachines.filter(machine => {
-      return machine.room && matchingRoomNames.has(machine.room);
-    });
-
-    console.log('🔧 Total machines available:', allMachines.length);
-    console.log('🔧 Machines after room filter:', machines.length);
-  } else if (searchTerm && rooms.length === 0) {
-    // Search term but no rooms loaded yet
-    console.log('⚠️ Search term entered but rooms not loaded yet');
-    machines = []; // Show "no results" while loading
-  }
-
-  console.log('🔧 Displaying machines:', machines);
-
-  // Handle report machine (permanent - adds to broken list)
-  const handleReportMachine = (machineId) => {
-    setBrokenMachines(prev => ({
-      ...prev,
-      [machineId]: true
-    }));
+    return (
+      <>
+        <SummaryBar machines={machines} />
+        <MachineGrid
+          machines={machines}
+          onReportBroken={handleReportBroken}
+          onReportFixed={handleReportFixed}
+          pendingIds={pendingIds}
+        />
+      </>
+    );
   };
 
   return (
-    <div className={styles.app}>
-      <Navigation />
-
-      <div className={styles.header}>
-        <h1 className={styles.title}>Bluer</h1>
+    <div className={styles.page}>
+      <header className={styles.header}>
+        <h1 className={styles.title}>{selectedRoom ? selectedRoom.name : 'Bluer'}</h1>
         <p className={styles.subtitle}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-            {isRefreshing && <span style={{ fontSize: '12px' }}>🔄</span>}
-            Rooms
-            {lastUpdate && (
-              <span style={{ fontSize: '12px', opacity: 0.7 }}>
-                • Updated {lastUpdate.toLocaleTimeString()}
-              </span>
-            )}
-          </span>
+          {selectedRoom
+            ? [selectedRoom.building, selectedRoom.floor].filter(Boolean).join(' · ') ||
+              'Live machine status'
+            : 'Live laundry room status'}
+          {lastUpdate && (
+            <span className={styles.timestamp}>
+              Updated {lastUpdate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+            </span>
+          )}
         </p>
-      </div>
+      </header>
 
       <div className={styles.searchContainer}>
         <RoomSearchAutocomplete
@@ -224,57 +281,7 @@ export default function Dashboard() {
         />
       </div>
 
-      {!searchTerm ? (
-        <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
-          <h2>Choose a Room!</h2>
-          <p>Use the search box above to select a laundry room.</p>
-        </div>
-      ) : allMachines.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
-          <h2>No machines connected yet</h2>
-          <p>Waiting for machines to send data...</p>
-          <p style={{ fontSize: '14px', marginTop: '10px' }}>
-            {isRefreshing ? 'Checking for devices...' : 'Auto-refreshing every 5 seconds'}
-          </p>
-        </div>
-      ) : machines.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
-          <h2>No machines found</h2>
-          {roomsLoading ? (
-            <p>Loading rooms...</p>
-          ) : rooms.length === 0 ? (
-            <p>No rooms available. Please log in to search rooms.</p>
-          ) : (
-            <>
-              <p>No machines found for rooms matching "{searchTerm}"</p>
-              <p style={{ fontSize: '0.9rem', marginTop: '0.5rem', color: '#999' }}>
-                Found {rooms.length} room{rooms.length !== 1 ? 's' : ''} total
-              </p>
-            </>
-          )}
-          <button
-            onClick={() => setSearchTerm('')}
-            style={{
-              marginTop: '1rem',
-              padding: '0.75rem 1.5rem',
-              backgroundColor: 'white',
-              color: 'black',
-              border: '1px solid black',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '1rem'
-            }}
-          >
-            Clear search
-          </button>
-        </div>
-      ) : (
-        <MachineGrid
-          machines={machines}
-          brokenMachines={brokenMachines}
-          onReportMachine={handleReportMachine}
-        />
-      )}
+      {renderBody()}
     </div>
   );
 }

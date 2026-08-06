@@ -233,11 +233,16 @@
 }
 
 .feature svg {
+    /* display:block so margin auto really centres it and no baseline gap
+       creeps in under the glyph -- inline SVGs sit on the text baseline, which
+       was giving each of the three a slightly different vertical offset. */
+    display: block;
     width: 48px;
     height: 48px;
     margin: 0 auto 1rem;
     color: #525252;
     transition: color 0.3s ease-out;
+    overflow: visible;
 }
 
 .feature:hover svg {

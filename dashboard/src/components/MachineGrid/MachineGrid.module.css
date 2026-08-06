@@ -1,15 +1,60 @@
 .grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 1rem;
-  padding: 1rem;
+  grid-template-columns: 1fr 1fr;
+  align-items: stretch;
+  column-gap: 0.625rem;
+  row-gap: 0.625rem;
   width: 100%;
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 0 0.75rem 3rem;
 }
 
 @media (min-width: 768px) {
   .grid {
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1.5rem;
-    padding: 1.5rem 2rem;
+    column-gap: 1.25rem;
+    row-gap: 1rem;
+    padding: 0 1.5rem 4rem;
   }
+}
+
+/* Sticky so you always know which column you are scrolling through. */
+.heading {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  grid-row: 1;
+  margin: 0;
+  padding: 0.5rem 0 0.4375rem;
+  background-color: var(--color-bg);
+  font-size: 0.6875rem;
+  font-weight: var(--font-semibold);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+@media (min-width: 768px) {
+  .heading {
+    font-size: 0.75rem;
+  }
+}
+
+.headingWashers {
+  grid-column: 1;
+}
+
+.headingDryers {
+  grid-column: 2;
+}
+
+/* Wrapper so the card fills the row height its pair establishes. */
+.cell {
+  display: flex;
+  min-width: 0;
+}
+
+.cell > * {
+  flex: 1;
 }

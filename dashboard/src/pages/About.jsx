@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { useState } from 'react';
 import styles from './About.module.css';
 
 export default function About() {
@@ -108,32 +107,34 @@ export default function About() {
         <section className={styles.technology}>
           <h2>The technology</h2>
           <div className={styles.techFeatures}>
+            {/* All three icons are drawn to the same 4..20 bounding box inside
+                the 24x24 viewBox, with matching stroke weight, so they carry
+                equal optical weight and sit on a common centre line. */}
             <div className={styles.feature}>
-              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z" fill="none" stroke="currentColor" strokeWidth="1.5"/>
-                <path d="M9 12l2 2 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 3.5 4.5 6.75v5.5c0 4.15 3 7.9 7.5 8.75 4.5-.85 7.5-4.6 7.5-8.75v-5.5L12 3.5Z"/>
+                <path d="m9.25 12.25 2 2 3.5-3.5"/>
               </svg>
               <h4>Vibration Detection</h4>
               <p>High-precision accelerometer tracks machine movement patterns</p>
             </div>
 
             <div className={styles.feature}>
-              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" fill="none" stroke="currentColor" strokeWidth="1.5"/>
-                <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5" fill="none" stroke="currentColor" strokeWidth="1.5"/>
-                <line x1="12" y1="19" x2="12" y2="22" stroke="currentColor" strokeWidth="1.5"/>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" xmlns="http://www.w3.org/2000/svg">
+                <rect x="9.25" y="3.5" width="5.5" height="10" rx="2.75"/>
+                <path d="M17.5 11.25a5.5 5.5 0 0 1-11 0"/>
+                <line x1="12" y1="16.75" x2="12" y2="20.5"/>
+                <line x1="8.25" y1="20.5" x2="15.75" y2="20.5"/>
               </svg>
               <h4>Sound Analysis</h4>
               <p>Machine learning algorithms identify wash cycle acoustics</p>
             </div>
 
             <div className={styles.feature}>
-              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" strokeWidth="1.5"/>
-                <line x1="12" y1="1" x2="12" y2="9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                <line x1="12" y1="15" x2="12" y2="23" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                <line x1="5" y1="12" x2="9" y2="12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                <line x1="15" y1="12" x2="19" y2="12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="3.25"/>
+                <path d="M12 4v2.5M12 17.5V20M4 12h2.5M17.5 12H20"/>
+                <path d="m6.4 6.4 1.75 1.75M15.85 15.85 17.6 17.6M17.6 6.4l-1.75 1.75M8.15 15.85 6.4 17.6"/>
               </svg>
               <h4>Adaptive Learning</h4>
               <p>Continuously improves accuracy by learning your machine's behavior</p>

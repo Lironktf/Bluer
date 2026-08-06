@@ -1,3 +1,7 @@
+/* Inter, self-hosted -- no render-blocking request to a third-party font host.
+   The variable build gives us every weight from one file. */
+@import '@fontsource-variable/inter';
+
 /* Reset and Base Styles */
 * {
   margin: 0;
@@ -9,26 +13,35 @@
 :root {
   /* Colors */
   --color-bg: #f5f5f4;
-  --color-grid-dot: #d4d4d8;
+  --color-surface: #ffffff;
+  --color-grid-dot: #dedede;
   --color-text-primary: #171717;
-  --color-text-secondary: #525252;
-  --color-text-tertiary: #737373;
-  --color-text-light: #a3a3a3;
-  --color-border: #e5e5e5;
-  --color-success: #22c55e;
-  --color-error: #ef4444;
-  --color-broken-bg: #fef2f2;
-  --color-hover-bg: rgba(0, 0, 0, 0.02);
+  --color-text-secondary: #4b4b4b;
+  --color-text-tertiary: #6b6b6b;
+  --color-text-light: #9a9a9a;
+  --color-border: #e2e2e0;
+
+  /* Machine status. Green = running, red = not running. */
+  --color-running: #22c55e;
+  --color-running-dark: #15803d;
+  --color-idle: #ef4444;
+
+  /* Reported-broken treatment */
+  --color-flag-bg: #fffbeb;
+  --color-flag-border: #fde68a;
+  --color-flag-text: #92400e;
+
+  --color-hover-bg: rgba(0, 0, 0, 0.04);
 
   /* Spacing */
   --radius: 8px;
 
   /* Animation */
-  --transition: 0.3s ease-out;
-  --transition-transform: 0.5s ease-out;
+  --transition: 0.18s ease-out;
 
   /* Typography */
-  --font-light: 300;
+  --font-regular: 400;
+  --font-medium: 500;
   --font-semibold: 600;
 }
 
@@ -38,15 +51,29 @@
 
 /* Body with dotted grid background */
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-  font-weight: var(--font-light);
+  font-family:
+    'Inter Variable',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
+  /* Was 300, which washed out badly against the off-white background. */
+  font-weight: var(--font-regular);
+  font-size: 16px;
+  line-height: 1.5;
   background-color: var(--color-bg);
   color: var(--color-text-secondary);
-  line-height: 1.7;
+
+  /* Keeps numerals in machine names and counts from jittering as they update. */
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 
   /* Subtle dotted grid background */
   background-image: radial-gradient(var(--color-grid-dot) 1px, transparent 1px);
-  background-size: 20px 20px;
+  background-size: 22px 22px;
   min-height: 100vh;
 }
 
@@ -56,13 +83,25 @@ html {
 }
 
 /* Accessibility improvements */
-a:focus,
-button:focus {
+a:focus-visible,
+button:focus-visible,
+input:focus-visible {
   outline: 2px solid var(--color-text-primary);
   outline-offset: 2px;
 }
 
 button {
   font-family: inherit;
+  font-size: inherit;
   cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

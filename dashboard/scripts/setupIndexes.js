@@ -101,6 +101,43 @@ async function setupIndexes() {
     console.log('   ✓ Created TTL index (90 days retention)');
     */
 
+    // ===== MACHINE REPORTS COLLECTION =====
+    console.log('\n🚩 Setting up indexes for "machineReports" collection...');
+    const reports = db.collection('machineReports');
+
+    // One report per device per machine per type per cycle. This is what makes
+    // the 3-distinct-devices threshold meaningful.
+    await reports.createIndex(
+      { machineId: 1, type: 1, deviceId: 1, cycleId: 1 },
+      { unique: true, name: 'report_dedupe_unique' }
+    );
+    console.log('   ✓ Created unique index on machineId + type + deviceId + cycleId');
+
+    // Counting pending reports inside the rolling window
+    await reports.createIndex(
+      { machineId: 1, type: 1, cycleId: 1, createdAt: -1 },
+      { name: 'report_lookup' }
+    );
+    console.log('   ✓ Created compound index for report counting');
+
+    // IP rate limiting
+    await reports.createIndex({ ipHash: 1, createdAt: -1 }, { name: 'ipHash_createdAt' });
+    console.log('   ✓ Created index on ipHash + createdAt');
+
+    // ===== MACHINE FLAGS COLLECTION =====
+    console.log('\n⚠️  Setting up indexes for "machineFlags" collection...');
+    const flags = db.collection('machineFlags');
+
+    // Active-flag lookup: not cleared, not expired
+    await flags.createIndex(
+      { clearedAt: 1, until: -1 },
+      { name: 'active_flags' }
+    );
+    console.log('   ✓ Created compound index on clearedAt + until');
+
+    await flags.createIndex({ machineId: 1, until: -1 }, { name: 'machineId_until' });
+    console.log('   ✓ Created compound index on machineId + until');
+
     // ===== VERIFY INDEXES =====
     console.log('\n🔍 Verifying indexes...');
 
