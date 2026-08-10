@@ -143,9 +143,6 @@ export default function About() {
         </section>
 
         {/* Footer */}
-        <footer className={styles.footer}>
-          <p>&copy; 2025 Bluer. Be Informed.</p>
-        </footer>
       </div>
     </div>
   );

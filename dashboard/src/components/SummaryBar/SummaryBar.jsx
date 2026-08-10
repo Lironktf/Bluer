@@ -1,9 +1,9 @@
-import { WASHER, DRYER, countFree } from '../../utils/machineLabel';
+import { WASHER, DRYER, countNotRunning } from '../../utils/machineLabel';
 import styles from './SummaryBar.module.css';
 
 /**
- * Answers "is anything free right now?" without scrolling -- the whole reason
- * someone opens this on their phone.
+ * Headline count, so the answer is visible without scrolling -- the whole
+ * reason someone opens this on their phone.
  */
 export default function SummaryBar({ machines }) {
   const washers = machines.filter((m) => m.type === WASHER);
@@ -20,18 +20,18 @@ export default function SummaryBar({ machines }) {
   }
 
   const counts = [
-    { key: 'washers', free: countFree(washers), noun: 'washer' },
-    { key: 'dryers', free: countFree(dryers), noun: 'dryer' },
+    { key: 'washers', value: countNotRunning(washers), noun: 'washer' },
+    { key: 'dryers', value: countNotRunning(dryers), noun: 'dryer' },
   ];
 
   return (
     <div className={styles.bar}>
-      {counts.map(({ key, free, noun }) => (
+      {counts.map(({ key, value, noun }) => (
         <span key={key} className={styles.item}>
-          <strong className={free > 0 ? styles.available : styles.none}>{free}</strong>
+          <strong className={value > 0 ? styles.available : styles.none}>{value}</strong>
           <span className={styles.label}>
             {noun}
-            {free === 1 ? '' : 's'} free
+            {value === 1 ? '' : 's'} not running
           </span>
         </span>
       ))}
