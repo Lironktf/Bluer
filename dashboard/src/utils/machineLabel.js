@@ -158,7 +158,14 @@ export function splitByType(slots) {
   };
 }
 
-/** Count machines that are idle and empty -- i.e. ready to use. */
-export function countFree(slots) {
-  return slots.filter((s) => s.hasSensor && !s.isRunning && s.isEmpty && !s.flagged).length;
+/**
+ * Count machines that are not currently running.
+ *
+ * This deliberately matches exactly what shows a green bar, so the headline
+ * number, the label and the card colours all agree. Note that it counts
+ * machines that are stopped but still full, and machines reported broken --
+ * both are, factually, not running.
+ */
+export function countNotRunning(slots) {
+  return slots.filter((s) => s.hasSensor && !s.isRunning).length;
 }
