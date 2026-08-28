@@ -25,8 +25,9 @@ export default function MachineGrid({ machines, onReportBroken, onReportFixed, p
           className={styles.cell}
           style={{
             gridColumn: machine.type === WASHER ? 1 : 2,
-            // +1 leaves room 1 for the sticky column headings.
-            gridRow: machine.typeIndex + 1,
+            // Walking order, not sticker number: the machines nearest the
+            // door sit at the top. +1 leaves room 1 for the sticky headings.
+            gridRow: machine.displayIndex + 1,
           }}
         >
           <MachineCard
