@@ -74,9 +74,9 @@ float
   activities[WINDOWTWO],  //Used to caluclates avg of last 15 seconds of activity
   deltastwo[WINDOWTHREE],
   activitysmallHistory[3],  //Holds history of last three small acitivties to capture the small activity 0.15s ago (3 x 50ms)
-  DYRERONTHRESHHOLD = 2.5,  //Thresholds
+  DYRERONTHRESHHOLD = 2.45,  //Thresholds
   //DOOROPENINGCHANGE = 0.45,
-  DOORCLOSINGCHANGE = 0.55,
+  DOORCLOSINGCHANGE = 0.65,
   avg10 = 0,  //Average activity over last 15 seconds (easier way just always keep track of the average)
   sum10 = 0   //used to calucate a new average every second
   ;
@@ -84,7 +84,7 @@ float
 // Machine identification and server configuration
 const char* machineId = "a1-m4";  // VARIES
 const char* serverUrl = "https://laun-dryer.vercel.app/api/machines";
-const char* washerMachineId = "a1-m5";  //VARIES
+const char* washerMachineId = "a1-m3";  //VARIES
 
 // Timing for sending updates (send every 5 seconds)
 unsigned long lastSendTime = 0;
@@ -92,7 +92,8 @@ const unsigned long sendInterval = 300000;  // 5 min
 
 class MyAdvertisedDeviceCallbacks : public NimBLEScanCallbacks {
   void onResult(const NimBLEAdvertisedDevice* advertisedDevice) override {
-    if (advertisedDevice->getName() == "WASHER_A3") {  //VARIES
+    if (advertisedDevice->getName() == "WASHER_A2") {  //VARIES
+      Serial.printf("[BLE RX] got washer packet, rssi=%d\n", advertisedDevice->getRSSI());
       std::string data = advertisedDevice->getManufacturerData();
 
       if (data.length() >= 2) {
