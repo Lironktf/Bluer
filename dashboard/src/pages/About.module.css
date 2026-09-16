@@ -262,6 +262,33 @@
     line-height: 1.6;
 }
 
+/* Videos */
+.videoGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 2rem;
+}
+
+.videoCard {
+    margin: 0;
+}
+
+/* height:auto keeps whatever aspect ratio the file actually has. */
+.video {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 70vh;
+    border-radius: 8px;
+    background-color: #0a0a0a;
+}
+
+.videoCard figcaption {
+    margin-top: 0.75rem;
+    font-size: 0.9375rem;
+    color: #737373;
+}
+
 /* Footer */
 .footer {
     text-align: center;
