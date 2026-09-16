@@ -1,7 +1,11 @@
 # WiFi Credentials
 Arduino/credentials.h
+Arduino/secrets.h
 /arduino/Current_no_power_opt/Dryer_Code_Bluer_No_power_opt/secrets.h
 dashboard/.env
+
+# Home test builds contain a plaintext WiFi password
+Arduino/*_home_test.ino
 
 # Node modules
 node_modules/
