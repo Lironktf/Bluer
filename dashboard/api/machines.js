@@ -59,7 +59,7 @@ export default async function handler(req, res) {
   try {
     // Handle POST - ESP32 sending status update
     if (req.method === 'POST') {
-      const { machineId, room, running, empty } = req.body;
+      const { machineId, room, running, empty, sensorOk, resetReason, uptime, freeHeap } = req.body;
 
       // Validate required fields
       if (!machineId || typeof running !== 'boolean' || typeof empty !== 'boolean') {
@@ -106,6 +106,13 @@ export default async function handler(req, res) {
       if (roomName) {
         updateData.room = roomName;
       }
+
+      // Optional firmware diagnostics. resetReason 9 is a brownout, 3 is a
+      // watchdog restart; nodes on older firmware simply omit these.
+      if (typeof sensorOk === 'boolean') updateData.sensorOk = sensorOk;
+      if (typeof resetReason === 'number') updateData.resetReason = resetReason;
+      if (typeof uptime === 'number') updateData.uptime = uptime;
+      if (typeof freeHeap === 'number') updateData.freeHeap = freeHeap;
       
       await machines.updateOne(
         { machineId },
@@ -186,7 +193,11 @@ export default async function handler(req, res) {
           available: isAvailable,
           room: machine.room || null, // Room name from machine
           lastUpdate: machine.lastUpdate,
-          timeSinceUpdate: timeSinceUpdate
+          timeSinceUpdate: timeSinceUpdate,
+          sensorOk: machine.sensorOk ?? null,
+          resetReason: machine.resetReason ?? null,
+          uptime: machine.uptime ?? null,
+          freeHeap: machine.freeHeap ?? null
         };
       }
 
