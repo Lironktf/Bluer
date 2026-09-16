@@ -6,6 +6,7 @@ import Footer from './components/Footer/Footer';
 import Dashboard from './pages/Dashboard';
 import About from './pages/About';
 import MyRooms from './pages/MyRooms';
+import TestMachines from './pages/TestMachines';
 
 function App() {
   return (
@@ -15,6 +16,8 @@ function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/about" element={<About />} />
         <Route path="/my-rooms" element={<MyRooms />} />
+        {/* Deliberately absent from Navigation: internal sensor diagnostics. */}
+        <Route path="/test" element={<TestMachines />} />
       </Routes>
 
       <Footer />
