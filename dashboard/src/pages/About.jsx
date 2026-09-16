@@ -152,7 +152,7 @@ export default function About() {
                 <source src="/videos/demo-1.mp4" type="video/mp4" />
                 Your browser cannot play this video.
               </video>
-              <figcaption>What Bluer is, and how to use it</figcaption>
+              <figcaption>Setting up a sensor on a machine</figcaption>
             </figure>
 
             <figure className={styles.videoCard}>
@@ -160,7 +160,7 @@ export default function About() {
                 <source src="/videos/demo-2.mp4" type="video/mp4" />
                 Your browser cannot play this video.
               </video>
-              <figcaption>Behind the scenes..</figcaption>
+              <figcaption>Checking availability from your phone</figcaption>
             </figure>
           </div>
         </section>
