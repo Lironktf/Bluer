@@ -142,6 +142,29 @@ export default function About() {
           </div>
         </section>
 
+        {/* Videos */}
+        <section>
+          <h2>See it in action</h2>
+
+          <div className={styles.videoGrid}>
+            <figure className={styles.videoCard}>
+              <video className={styles.video} controls preload="metadata" playsInline>
+                <source src="/videos/demo-1.mp4" type="video/mp4" />
+                Your browser cannot play this video.
+              </video>
+              <figcaption>Setting up a sensor on a machine</figcaption>
+            </figure>
+
+            <figure className={styles.videoCard}>
+              <video className={styles.video} controls preload="metadata" playsInline>
+                <source src="/videos/demo-2.mp4" type="video/mp4" />
+                Your browser cannot play this video.
+              </video>
+              <figcaption>Checking availability from your phone</figcaption>
+            </figure>
+          </div>
+        </section>
+
         {/* Footer */}
       </div>
     </div>
