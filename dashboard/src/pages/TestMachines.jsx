@@ -58,6 +58,22 @@ function formatHeap(bytes) {
   return `${Math.round(bytes / 1024)} KB`;
 }
 
+// Prefix descending so test IDs (s1, b1) sit above the deployed a1 machines,
+// then numerically within a prefix so m10 does not land between m1 and m2.
+function comparePrefixDesc(a, b) {
+  const pattern = /^([a-z0-9]+)-m(\d+)$/i;
+  const ma = pattern.exec(a);
+  const mb = pattern.exec(b);
+
+  if (!ma || !mb) return b.localeCompare(a);
+
+  const prefixA = ma[1].toLowerCase();
+  const prefixB = mb[1].toLowerCase();
+  if (prefixA !== prefixB) return prefixB.localeCompare(prefixA);
+
+  return parseInt(ma[2], 10) - parseInt(mb[2], 10);
+}
+
 export default function TestMachines() {
   const [machines, setMachines] = useState({});
   const [fetchedAt, setFetchedAt] = useState(null);
@@ -76,7 +92,7 @@ export default function TestMachines() {
     return () => clearInterval(interval);
   }, [refresh]);
 
-  const ids = Object.keys(machines).sort();
+  const ids = Object.keys(machines).sort(comparePrefixDesc);
 
   return (
     <div className={styles.page}>
