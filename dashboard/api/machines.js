@@ -40,6 +40,10 @@ const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
 const MISSED_HEARTBEATS_BEFORE_OFFLINE = 3;
 const OFFLINE_TIMEOUT_MS = HEARTBEAT_INTERVAL_MS * MISSED_HEARTBEATS_BEFORE_OFFLINE;
 
+// Nodes running the hardened firmware trial. Add an id here to start capturing
+// every heartbeat for it; remove it to stop. Empty list disables the capture.
+const DIAGNOSTIC_MACHINE_IDS = ['a1-m20', 'a1-m19', 'a1-m18', 'a1-m17'];
+
 export default async function handler(req, res) {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Credentials', true);
@@ -122,6 +126,24 @@ export default async function handler(req, res) {
         },
         { upsert: true }
       );
+      
+      // Units under firmware trial: keep every heartbeat, not just state changes,
+      // so reboots and heap drift stay visible after the fact.
+      if (DIAGNOSTIC_MACHINE_IDS.includes(machineId)) {
+        const diagnostics = await getCollection('machineDiagnostics');
+        await diagnostics.insertOne({
+          machineId,
+          running,
+          empty,
+          sensorOk: typeof sensorOk === 'boolean' ? sensorOk : null,
+          resetReason: typeof resetReason === 'number' ? resetReason : null,
+          uptime: typeof uptime === 'number' ? uptime : null,
+          freeHeap: typeof freeHeap === 'number' ? freeHeap : null,
+          room: roomName || null,
+          stateChanged,
+          timestamp: now
+        });
+      }
 
       // Record state change in history if state actually changed
       if (stateChanged) {
