@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import styles from './TestMachines.module.css';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://laun-dryer.vercel.app';
@@ -100,7 +101,8 @@ export default function TestMachines() {
       <p className={styles.sub}>
         Every machine the API knows about, including test IDs that never appear on the
         dashboard. Refreshes every {POLL_INTERVAL_MS / 1000}s.
-        {fetchedAt && ` Last fetch ${fetchedAt.toLocaleTimeString()}.`}
+        {fetchedAt && ` Last fetch ${fetchedAt.toLocaleTimeString()}.`}{' '}
+        <Link to="/test/history">Firmware trial log</Link>
       </p>
 
       {ids.length === 0 && <p className={styles.empty}>No machines reporting.</p>}
