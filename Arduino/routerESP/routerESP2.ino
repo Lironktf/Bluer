@@ -6,8 +6,8 @@
 //#include <credentials.h>
 #include <map>
 
-const char* ssid = "Jeff 5G Home Network";
-const char* password = "Brodie1998";
+const char* ssid = "";
+const char* password = "";
 
 // Server configuration
 const char* serverUrl = "https://laun-dryer.vercel.app/api/machines";
