@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { machineNumberFromId, typeForNumber } from '../utils/machineLabel';
 import styles from './TestMachines.module.css';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://laun-dryer.vercel.app';
@@ -75,6 +76,27 @@ function comparePrefixDesc(a, b) {
   return parseInt(ma[2], 10) - parseInt(mb[2], 10);
 }
 
+// Sensor type follows the same odd/even convention the dashboard already uses.
+function sensorLabel(machineId) {
+  const number = machineNumberFromId(machineId);
+  if (number === null || number === undefined) return null;
+  return typeForNumber(number) === 'washer' ? 'INMP' : 'MPU';
+}
+
+// "flat" = answers but never changes, "noreply" = not on the bus at all. Both mean
+// the wiring at the sensor needs attention rather than the node itself.
+function sensorText(m) {
+  if (!m.sensorState) return '--';
+  if (m.sensorState === 'ok') return 'ok';
+  if (m.sensorState === 'flat') return 'FLAT';
+  if (m.sensorState === 'noreply') return 'NO REPLY';
+  return m.sensorState;
+}
+
+function sensorIsBad(m) {
+  return m.sensorState === 'flat' || m.sensorState === 'noreply';
+}
+
 export default function TestMachines() {
   const [machines, setMachines] = useState({});
   const [fetchedAt, setFetchedAt] = useState(null);
@@ -128,7 +150,7 @@ export default function TestMachines() {
                 const m = machines[id];
                 const stale = m.timeSinceUpdate > 15 * 60 * 1000;
                 const brownout = m.resetReason === 9;
-                const sensorBad = m.sensorOk === false;
+                const sensorBad = sensorIsBad(m);
 
                 return (
                   <tr key={id} className={stale ? styles.stale : undefined}>
@@ -137,11 +159,10 @@ export default function TestMachines() {
                     <td>{m.empty ? 'yes' : 'no'}</td>
                     <td>{formatAge(m.timeSinceUpdate)}</td>
                     <td className={sensorBad ? styles.bad : undefined}>
-                      {m.sensorOk === null || m.sensorOk === undefined
-                        ? '--'
-                        : m.sensorOk
-                          ? 'ok'
-                          : 'FAULT'}
+                      {sensorText(m)}
+                      {m.sensorState && m.sensorState !== 'unknown' && sensorLabel(id) && (
+                        <span className={styles.room}> ({sensorLabel(id)})</span>
+                      )}
                     </td>
                     <td className={brownout ? styles.bad : undefined}>
                       {m.resetReason === null || m.resetReason === undefined
@@ -160,8 +181,8 @@ export default function TestMachines() {
       )}
 
       <p className={styles.note}>
-        Dashes mean the node is on firmware that does not report diagnostics yet.
-        Rows dim after 15 minutes without an update.
+        Rows dim after 15 minutes without an update. Sensor FLAT or NO REPLY means the
+        wiring at the sensor; a stale row with a healthy sensor means power, WiFi or the ESP32.
       </p>
     </div>
   );
