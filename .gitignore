@@ -12,6 +12,9 @@ node_modules/
 
 # Build outputs
 dist/
+
+# macOS Finder metadata
+.DS_Store
 dist-ssr/
 
 # Logs
