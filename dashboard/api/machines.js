@@ -63,7 +63,7 @@ export default async function handler(req, res) {
   try {
     // Handle POST - ESP32 sending status update
     if (req.method === 'POST') {
-      const { machineId, room, running, empty, sensorOk, resetReason, uptime, freeHeap } = req.body;
+      const { machineId, room, running, empty, sensorState, resetReason, uptime, freeHeap } = req.body;
 
       // Validate required fields
       if (!machineId || typeof running !== 'boolean' || typeof empty !== 'boolean') {
@@ -113,20 +113,35 @@ export default async function handler(req, res) {
 
       // Optional firmware diagnostics. resetReason 9 is a brownout, 3 is a
       // watchdog restart; nodes on older firmware simply omit these.
-      if (typeof sensorOk === 'boolean') updateData.sensorOk = sensorOk;
+      // "ok" | "flat" | "noreply" | "unknown": flat and noreply both mean the wiring
+      // at the sensor, not the node, needs attention.
+      if (typeof sensorState === 'string') updateData.sensorState = sensorState;
       if (typeof resetReason === 'number') updateData.resetReason = resetReason;
       if (typeof uptime === 'number') updateData.uptime = uptime;
       if (typeof freeHeap === 'number') updateData.freeHeap = freeHeap;
       
-      await machines.updateOne(
-        { machineId },
-        {
-          $set: updateData,
-          $setOnInsert: { createdAt: now }
-        },
-        { upsert: true }
-      );
-      
+      // A relay POST carries no node diagnostics, because they belong to the dryer
+      // doing the relaying. Clear those, and the superseded sensorOk, once a node
+      // starts reporting sensorState.
+      const reportsSensorState = typeof sensorState === 'string';
+      const isRelay = reportsSensorState && typeof uptime !== 'number';
+      const update = {
+        $set: updateData,
+        $setOnInsert: { createdAt: now }
+      };
+      const unset = {};
+      if (reportsSensorState) unset.sensorOk = '';
+      if (isRelay) {
+        unset.resetReason = '';
+        unset.uptime = '';
+        unset.freeHeap = '';
+      }
+      if (Object.keys(unset).length > 0) {
+        update.$unset = unset;
+      }
+
+      await machines.updateOne({ machineId }, update, { upsert: true });
+
       // Units under firmware trial: keep every heartbeat, not just state changes,
       // so reboots and heap drift stay visible after the fact.
       if (DIAGNOSTIC_MACHINE_IDS.includes(machineId)) {
@@ -135,7 +150,7 @@ export default async function handler(req, res) {
           machineId,
           running,
           empty,
-          sensorOk: typeof sensorOk === 'boolean' ? sensorOk : null,
+          sensorState: typeof sensorState === 'string' ? sensorState : null,
           resetReason: typeof resetReason === 'number' ? resetReason : null,
           uptime: typeof uptime === 'number' ? uptime : null,
           freeHeap: typeof freeHeap === 'number' ? freeHeap : null,
@@ -216,7 +231,7 @@ export default async function handler(req, res) {
           room: machine.room || null, // Room name from machine
           lastUpdate: machine.lastUpdate,
           timeSinceUpdate: timeSinceUpdate,
-          sensorOk: machine.sensorOk ?? null,
+          sensorState: machine.sensorState ?? null,
           resetReason: machine.resetReason ?? null,
           uptime: machine.uptime ?? null,
           freeHeap: machine.freeHeap ?? null
