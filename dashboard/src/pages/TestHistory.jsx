@@ -47,6 +47,18 @@ function formatStamp(iso) {
   });
 }
 
+function sensorText(r) {
+  if (!r.sensorState) return '--';
+  if (r.sensorState === 'ok') return 'ok';
+  if (r.sensorState === 'flat') return 'FLAT';
+  if (r.sensorState === 'noreply') return 'NO REPLY';
+  return r.sensorState;
+}
+
+function sensorIsBad(r) {
+  return r.sensorState === 'flat' || r.sensorState === 'noreply';
+}
+
 export default function TestHistory() {
   const [records, setRecords] = useState([]);
   const [machineFilter, setMachineFilter] = useState('');
@@ -147,7 +159,7 @@ export default function TestHistory() {
             <tbody>
               {rows.map((r) => {
                 const brownout = r.resetReason === 9;
-                const sensorBad = r.sensorOk === false;
+                const sensorBad = sensorIsBad(r);
                 const rebooted = rebootRowIds.has(r._id);
 
                 return (
@@ -157,11 +169,7 @@ export default function TestHistory() {
                     <td>{r.running ? 'yes' : 'no'}</td>
                     <td>{r.empty ? 'yes' : 'no'}</td>
                     <td className={sensorBad ? styles.bad : undefined}>
-                      {r.sensorOk === null || r.sensorOk === undefined
-                        ? '--'
-                        : r.sensorOk
-                          ? 'ok'
-                          : 'FAULT'}
+                      {sensorText(r)}
                     </td>
                     <td className={brownout ? styles.bad : undefined}>
                       {r.resetReason === null || r.resetReason === undefined
