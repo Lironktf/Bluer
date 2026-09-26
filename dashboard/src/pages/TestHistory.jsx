@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { machineNumberFromId, typeForNumber } from '../utils/machineLabel';
 import styles from './TestHistory.module.css';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://laun-dryer.vercel.app';
@@ -45,6 +46,13 @@ function formatStamp(iso) {
     second: '2-digit',
     hour12: false,
   });
+}
+
+// Sensor type follows the same odd/even convention the dashboard already uses.
+function sensorLabel(machineId) {
+  const number = machineNumberFromId(machineId);
+  if (number === null || number === undefined) return null;
+  return typeForNumber(number) === 'washer' ? 'INMP' : 'MPU';
 }
 
 function sensorText(r) {
@@ -170,6 +178,9 @@ export default function TestHistory() {
                     <td>{r.empty ? 'yes' : 'no'}</td>
                     <td className={sensorBad ? styles.bad : undefined}>
                       {sensorText(r)}
+                      {r.sensorState && r.sensorState !== 'unknown' && sensorLabel(r.machineId) && (
+                        <span className={styles.room}> ({sensorLabel(r.machineId)})</span>
+                      )}
                     </td>
                     <td className={brownout ? styles.bad : undefined}>
                       {r.resetReason === null || r.resetReason === undefined
