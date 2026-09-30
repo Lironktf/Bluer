@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { machineNumberFromId, typeForNumber } from '../utils/machineLabel';
+import { parseMachineId, TRIAL_MACHINE_IDS } from '../utils/machineLabel';
 import styles from './TestMachines.module.css';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://laun-dryer.vercel.app';
@@ -60,27 +60,24 @@ function formatHeap(bytes) {
   return `${Math.round(bytes / 1024)} KB`;
 }
 
-// Prefix descending so test IDs (s1, b1) sit above the deployed a1 machines,
-// then numerically within a prefix so m10 does not land between m1 and m2.
+// Prefix descending so test ids (b1, s1) sit above the deployed sj machines,
+// then by machine number, washer before dryer within a pair.
 function comparePrefixDesc(a, b) {
-  const pattern = /^([a-z0-9]+)-m(\d+)$/i;
-  const ma = pattern.exec(a);
-  const mb = pattern.exec(b);
+  const pa = parseMachineId(a);
+  const pb = parseMachineId(b);
 
-  if (!ma || !mb) return b.localeCompare(a);
+  if (!pa || !pb) return b.localeCompare(a);
 
-  const prefixA = ma[1].toLowerCase();
-  const prefixB = mb[1].toLowerCase();
-  if (prefixA !== prefixB) return prefixB.localeCompare(prefixA);
-
-  return parseInt(ma[2], 10) - parseInt(mb[2], 10);
+  if (pa.prefix !== pb.prefix) return pb.prefix.localeCompare(pa.prefix);
+  if (pa.number !== pb.number) return pa.number - pb.number;
+  return pa.type === pb.type ? 0 : pa.type === 'washer' ? -1 : 1;
 }
 
-// Sensor type follows the same odd/even convention the dashboard already uses.
+// Sensor type follows straight from the id: washers carry an INMP441, dryers an MPU6050.
 function sensorLabel(machineId) {
-  const number = machineNumberFromId(machineId);
-  if (number === null || number === undefined) return null;
-  return typeForNumber(number) === 'washer' ? 'INMP' : 'MPU';
+  const parsed = parseMachineId(machineId);
+  if (!parsed) return null;
+  return parsed.type === 'washer' ? 'INMP' : 'MPU';
 }
 
 // "flat" = answers but never changes, "noreply" = not on the bus at all. Both mean
@@ -115,14 +112,16 @@ export default function TestMachines() {
     return () => clearInterval(interval);
   }, [refresh]);
 
-  const ids = Object.keys(machines).sort(comparePrefixDesc);
+  const ids = Object.keys(machines)
+    .filter((id) => TRIAL_MACHINE_IDS.includes(id))
+    .sort(comparePrefixDesc);
 
   return (
     <div className={styles.page}>
       <h1>Sensor diagnostics</h1>
       <p className={styles.sub}>
-        Every machine the API knows about, including test IDs that never appear on the
-        dashboard. Refreshes every {POLL_INTERVAL_MS / 1000}s.
+        The nodes currently on the hardened firmware trial. Refreshes every{' '}
+        {POLL_INTERVAL_MS / 1000}s.
         {fetchedAt && ` Last fetch ${fetchedAt.toLocaleTimeString()}.`}{' '}
         <Link to="/test/history">Firmware trial log</Link>
       </p>
