@@ -6,6 +6,9 @@ import MachineGrid from '../components/MachineGrid/MachineGrid';
 import SummaryBar from '../components/SummaryBar/SummaryBar';
 import RoomSearchAutocomplete from '../components/RoomSearchAutocomplete/RoomSearchAutocomplete';
 import { buildRoomSlots, roomPrefix } from '../utils/machineLabel';
+
+// Set false once the fleet is reflashed and the readings can be trusted again.
+const MAINTENANCE_MODE = true;
 import { getDeviceId } from '../utils/deviceId';
 import styles from './Dashboard.module.css';
 
@@ -170,7 +173,9 @@ export default function Dashboard() {
   // Every slot the room is configured to have, whether or not a sensor exists.
   const machines = useMemo(() => {
     if (!selectedRoom) return [];
-    return buildRoomSlots(selectedRoom.name, machineStatuses, reportState);
+    // Maintenance clears the slate: the old broken reports describe machines that
+    // are being fixed right now, so none of them should carry over.
+    return buildRoomSlots(selectedRoom.name, machineStatuses, MAINTENANCE_MODE ? {} : reportState);
   }, [selectedRoom, machineStatuses, reportState]);
 
   const sendReport = useCallback(
@@ -256,12 +261,17 @@ export default function Dashboard() {
     return (
       <>
         <SummaryBar machines={machines} />
-        <MachineGrid
-          machines={machines}
-          onReportBroken={handleReportBroken}
-          onReportFixed={handleReportFixed}
-          pendingIds={pendingIds}
-        />
+        <div
+          className={MAINTENANCE_MODE ? styles.maintenanceDimmed : undefined}
+          inert={MAINTENANCE_MODE ? '' : undefined}
+        >
+          <MachineGrid
+            machines={machines}
+            onReportBroken={handleReportBroken}
+            onReportFixed={handleReportFixed}
+            pendingIds={pendingIds}
+          />
+        </div>
       </>
     );
   };
@@ -291,6 +301,13 @@ export default function Dashboard() {
           disabled={roomsLoading}
         />
       </div>
+
+      {MAINTENANCE_MODE && (
+        <div className={styles.maintenanceBanner} role="status">
+          <strong>System under maintenance.</strong> Sensor readings below are not reliable and
+          reporting is paused. Back up and running Saturday, October 3rd.
+        </div>
+      )}
 
       {renderBody()}
     </div>
