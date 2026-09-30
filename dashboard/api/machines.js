@@ -10,20 +10,20 @@ import { getCollection } from './lib/mongodb.js';
 
 /**
  * Map machine ID prefix to room name
- * Extracts prefix from machineId (e.g., "a1" from "a1-m1") and maps to room
+ * Extracts prefix from machineId (e.g., "sj" from "sj-w1") and maps to room
  * Update this mapping as you add new areas/machines
  */
 function getRoomFromMachineId(machineId) {
-  // Extract prefix (e.g., "a1" from "a1-m1")
-  const match = machineId.match(/^([a-z0-9]+)-/i);
+  // Extract prefix (e.g., "sj" from "sj-w1")
+  const match = machineId.match(/^([a-z]+)-/i);
   if (!match) return null;
   
   const prefix = match[1].toLowerCase();
   
   // Mapping: area prefix -> room name
   const areaToRoomMap = {
-    'a1': 'SJU-Sieg/Ryan',
-    'a2': 'SJU-Finn',
+    'sj': 'SJU-Sieg/Ryan',
+    'fn': 'SJU-Finn',
   };
   
   return areaToRoomMap[prefix] || null;
@@ -42,7 +42,7 @@ const OFFLINE_TIMEOUT_MS = HEARTBEAT_INTERVAL_MS * MISSED_HEARTBEATS_BEFORE_OFFL
 
 // Nodes running the hardened firmware trial. Add an id here to start capturing
 // every heartbeat for it; remove it to stop. Empty list disables the capture.
-const DIAGNOSTIC_MACHINE_IDS = ['a1-m20', 'a1-m19', 'a1-m18', 'a1-m17'];
+const DIAGNOSTIC_MACHINE_IDS = ['a1-m20', 'a1-m19', 'sj-d1', 'sj-w1'];
 
 export default async function handler(req, res) {
   // Enable CORS
@@ -90,7 +90,7 @@ export default async function handler(req, res) {
       if (!roomName || typeof roomName !== 'string' || roomName.trim() === '') {
         roomName = getRoomFromMachineId(machineId);
         if (roomName) {
-          console.log(`📍 Mapped ${machineId} (prefix: ${machineId.match(/^([a-z0-9]+)-/i)?.[1]}) -> ${roomName}`);
+          console.log(`📍 Mapped ${machineId} (prefix: ${machineId.match(/^([a-z]+)-/i)?.[1]}) -> ${roomName}`);
         }
       } else {
         roomName = roomName.trim();
