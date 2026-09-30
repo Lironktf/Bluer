@@ -8,8 +8,8 @@
 #include <esp_task_wdt.h>
 
 // Custom tracking string for the washer
-#define WASHER_BLE_NAME "WASHER_M19"        //VARIES: must equal the name the paired dryer filters on
-const char* machineId = "WASHER_NODE_M19";  //Doesnt  matter
+#define WASHER_BLE_NAME "WASHER_W1"        //VARIES: must equal the name the paired dryer filters on
+const char* machineId = "WASHER_NODE_W1";  //Doesnt  matter
 
 // Read by supervisorTask on core 0, written by loop() on core 1.
 volatile bool empty = true;
