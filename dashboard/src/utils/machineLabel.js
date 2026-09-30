@@ -1,97 +1,88 @@
 // Machine naming convention.
 //
-// Sensors were assigned ids a1-m1 .. a1-m20 in one direction, but the physical
-// stickers already on the machines in room a1 run the OTHER way. The pair you
-// meet first walking in (a1-m1 / a1-m2) is stickered 10, and the pair at the far
-// end (a1-m19 / a1-m20) is stickered 1. Odd ids are washers, even ids are
-// dryers, and the number is mirrored:
+// Ids are "<room>-<type><number>", e.g. sj-w1 is Washer 1 and sj-d1 is Dryer 1
+// in the St Jerome's room. The type is in the id, and the number is the number
+// printed on the machine's sticker, counting from the door.
 //
-//   a1-m1  -> Washer 10    a1-m2  -> Dryer 10
-//   a1-m3  -> Washer 9     a1-m4  -> Dryer 9
+//   sj-w1  -> Washer 1     sj-d1  -> Dryer 1      (far end)
+//   sj-w2  -> Washer 2     sj-d2  -> Dryer 2
 //   ...                    ...
-//   a1-m19 -> Washer 1     a1-m20 -> Dryer 1
+//   sj-w10 -> Washer 10    sj-d10 -> Dryer 10     (nearest the door)
 //
-// Cards stay ordered by machine id, which puts the 10s at the top of the page
-// and counts down to 1 at the bottom -- the order you actually walk past them.
-//
-// The mirroring describes how this one room was stickered, not a universal
-// rule, so it is opt-in per room rather than baked into the maths.
+// This replaced an older scheme (a1-m1 .. a1-m20) where odd ids were washers,
+// even ids were dryers, and the numbering ran the opposite way to the stickers.
 
 export const WASHER = 'washer';
 export const DRYER = 'dryer';
 
 // Machine id prefix for each room. Mirrors the areaToRoomMap in api/machines.js.
 const ROOM_PREFIXES = {
-  'SJU-Sieg/Ryan': 'a1',
-  'SJU-Finn': 'a2',
+  'SJU-Sieg/Ryan': 'sj',
+  'SJU-Finn': 'fn',
 };
 
-// How many machine slots each room has, so we can render placeholders for
-// machines that have never reported in.
-// TODO: move this onto the rooms collection (room.machineIds) once a second
-// room is actually wired up with sensors.
-const ROOM_MACHINE_COUNTS = {
-  'SJU-Sieg/Ryan': 20,
+// How many washer/dryer pairs a room has.
+const ROOM_PAIR_COUNTS = {
+  'SJU-Sieg/Ryan': 10,
 };
 
-const DEFAULT_MACHINE_COUNT = 20;
+const DEFAULT_PAIR_COUNT = 10;
 
-// Rooms whose stickers number machines in the opposite direction to their ids.
-const ROOMS_WITH_MIRRORED_LABELS = new Set(['SJU-Sieg/Ryan']);
+/** Parse an id, e.g. "sj-w3" -> { prefix: 'sj', type: 'washer', number: 3 }. */
+export function parseMachineId(machineId) {
+  const match = /^([a-z]+)-([wd])(\d+)$/i.exec(machineId || '');
+  if (match) {
+    return {
+      prefix: match[1].toLowerCase(),
+      type: match[2].toLowerCase() === 'w' ? WASHER : DRYER,
+      number: parseInt(match[3], 10),
+    };
+  }
+  return parseLegacyMachineId(machineId);
+}
 
-/** Extract the trailing machine number from an id, e.g. "a1-m3" -> 3. */
+// Transitional: the trial pair still runs the old a1-m19 / a1-m20 firmware, where
+// odd was a washer and the numbering ran backwards. Delete once every node is
+// reflashed onto the sj- scheme.
+function parseLegacyMachineId(machineId) {
+  const match = /^([a-z0-9]+)-m(\d+)$/i.exec(machineId || '');
+  if (!match) return null;
+  const legacyNumber = parseInt(match[2], 10);
+  return {
+    prefix: match[1].toLowerCase(),
+    type: legacyNumber % 2 === 1 ? WASHER : DRYER,
+    number: 11 - Math.ceil(legacyNumber / 2),
+    legacy: true,
+  };
+}
+
+// Nodes on the hardened firmware trial, old ids and new, so the diagnostics pages
+// keep working across the reflash. Everything else is hidden from /test.
+export const TRIAL_MACHINE_IDS = ['a1-m20', 'a1-m19', 'sj-d1', 'sj-w1'];
+
+/** The number printed on the machine's sticker, e.g. "sj-w3" -> 3. */
 export function machineNumberFromId(machineId) {
-  const match = /m(\d+)$/.exec(machineId || '');
-  return match ? parseInt(match[1], 10) : null;
+  return parseMachineId(machineId)?.number ?? null;
 }
 
-/** Odd numbers are washers, even numbers are dryers. */
-export function typeForNumber(number) {
-  return number % 2 === 1 ? WASHER : DRYER;
+/** Washer or dryer, taken straight from the id. */
+export function typeForMachineId(machineId) {
+  return parseMachineId(machineId)?.type ?? null;
 }
 
-/**
- * Position in walking order, counting from the door: m1/m2 -> 1, m3/m4 -> 2,
- * ... m19/m20 -> 10. This drives where a card sits on the page.
- */
-export function displayIndexForNumber(number) {
-  return Math.ceil(number / 2);
-}
-
-/**
- * The number actually printed on the machine's sticker. In a mirrored room the
- * machine nearest the door is the highest number, so the index counts down.
- */
-export function typeIndexForNumber(number, { perType = 10, mirrored = false } = {}) {
-  const position = displayIndexForNumber(number);
-  return mirrored ? perType + 1 - position : position;
-}
-
-/** Display name, e.g. 5 -> "Washer 8" in a mirrored room of 20. */
-export function labelForNumber(number, options) {
-  const noun = typeForNumber(number) === WASHER ? 'Washer' : 'Dryer';
-  return `${noun} ${typeIndexForNumber(number, options)}`;
-}
-
-export function labelForMachineId(machineId, options) {
-  const number = machineNumberFromId(machineId);
-  return number === null ? machineId : labelForNumber(number, options);
+/** Display name, e.g. "sj-w3" -> "Washer 3". */
+export function labelForMachineId(machineId) {
+  const parsed = parseMachineId(machineId);
+  if (!parsed) return machineId;
+  return `${parsed.type === WASHER ? 'Washer' : 'Dryer'} ${parsed.number}`;
 }
 
 export function roomPrefix(roomName) {
   return ROOM_PREFIXES[roomName] || null;
 }
 
-export function roomMachineCount(roomName) {
-  return ROOM_MACHINE_COUNTS[roomName] ?? DEFAULT_MACHINE_COUNT;
-}
-
-/** Labelling rules for a room: how many of each type, and which way they count. */
-export function roomLabelOptions(roomName) {
-  return {
-    perType: Math.ceil(roomMachineCount(roomName) / 2),
-    mirrored: ROOMS_WITH_MIRRORED_LABELS.has(roomName),
-  };
+export function roomPairCount(roomName) {
+  return ROOM_PAIR_COUNTS[roomName] ?? DEFAULT_PAIR_COUNT;
 }
 
 // A reading counts as current within this window. Beyond it we still show the
@@ -123,47 +114,46 @@ export function buildRoomSlots(roomName, statuses = {}, reports = {}) {
   const prefix = roomPrefix(roomName);
   if (!prefix) return [];
 
-  const count = roomMachineCount(roomName);
-  const labelOptions = roomLabelOptions(roomName);
+  const pairs = roomPairCount(roomName);
   const now = Date.now();
   const slots = [];
 
-  for (let number = 1; number <= count; number++) {
-    const id = `${prefix}-m${number}`;
-    const status = statuses[id];
-    const report = reports[id];
+  for (let number = 1; number <= pairs; number++) {
+    for (const type of [WASHER, DRYER]) {
+      const id = `${prefix}-${type === WASHER ? 'w' : 'd'}${number}`;
+      const status = statuses[id];
+      const report = reports[id];
 
-    const lastUpdate = status?.lastUpdate ? new Date(status.lastUpdate) : null;
-    const hasSensor = Boolean(status) && lastUpdate !== null;
-    const ageMs = hasSensor ? now - lastUpdate.getTime() : null;
+      const lastUpdate = status?.lastUpdate ? new Date(status.lastUpdate) : null;
+      const hasSensor = Boolean(status) && lastUpdate !== null;
+      const ageMs = hasSensor ? now - lastUpdate.getTime() : null;
 
-    slots.push({
-      id,
-      number,
-      type: typeForNumber(number),
-      // Where the card sits on the page: walking order from the door.
-      displayIndex: displayIndexForNumber(number),
-      // The number on the machine's sticker, which in this room counts the
-      // opposite way to displayIndex.
-      typeIndex: typeIndexForNumber(number, labelOptions),
-      label: labelForNumber(number, labelOptions),
+      slots.push({
+        id,
+        number,
+        type,
+        // Where the card sits on the page: walking order from the door.
+        displayIndex: number,
+        typeIndex: number,
+        label: `${type === WASHER ? 'Washer' : 'Dryer'} ${number}`,
 
-      // No sensor has ever reported for this slot -- there is genuinely
-      // nothing to display.
-      hasSensor,
-      // Reading is recent enough to present without qualification.
-      isFresh: hasSensor && ageMs < FRESH_WINDOW_MS,
-      ageMs,
-      lastUpdate,
+        // No sensor has ever reported for this slot -- there is genuinely
+        // nothing to display.
+        hasSensor,
+        // Reading is recent enough to present without qualification.
+        isFresh: hasSensor && ageMs < FRESH_WINDOW_MS,
+        ageMs,
+        lastUpdate,
 
-      isRunning: Boolean(status?.running) && hasSensor && ageMs < RUNNING_SHELF_LIFE_MS,
-      isEmpty: Boolean(status?.empty),
+        isRunning: Boolean(status?.running) && hasSensor && ageMs < RUNNING_SHELF_LIFE_MS,
+        isEmpty: Boolean(status?.empty),
 
-      flagged: Boolean(report?.flagged),
-      flaggedUntil: report?.until ? new Date(report.until) : null,
-      brokenCount: report?.brokenCount || 0,
-      fixedCount: report?.fixedCount || 0,
-    });
+        flagged: Boolean(report?.flagged),
+        flaggedUntil: report?.until ? new Date(report.until) : null,
+        brokenCount: report?.brokenCount || 0,
+        fixedCount: report?.fixedCount || 0,
+      });
+    }
   }
 
   return slots;
