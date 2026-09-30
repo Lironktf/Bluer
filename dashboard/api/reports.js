@@ -34,6 +34,24 @@ const BROKEN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // stale reports stop counting
 const IP_RATE_LIMIT = 20;
 const IP_RATE_WINDOW_MS = 60 * 60 * 1000;
 
+// Reports filed before this are ignored for good. Bumped at the end of a
+// maintenance window so the backlog of "broken" from before the repairs does not
+// come back when reporting reopens.
+const REPORTS_VALID_FROM = new Date('2026-10-04T04:00:00Z'); // midnight Oct 4, Waterloo time
+
+// One person tapping every machine is not 20 people finding 20 faults. This many
+// broken reports across the whole site inside an hour locks further broken
+// reports for a day. Silent on purpose: telling an abuser the limit just tells
+// them how to pace themselves.
+const BROKEN_BURST_COUNT = 2;
+const BROKEN_BURST_WINDOW_MS = 60 * 60 * 1000;
+const BROKEN_LOCKOUT_MS = 24 * 60 * 60 * 1000;
+
+/** Earliest createdAt that still counts toward a machine's broken total. */
+function brokenCountingSince(now) {
+  return new Date(Math.max(now.getTime() - BROKEN_WINDOW_MS, REPORTS_VALID_FROM.getTime()));
+}
+
 const VALID_TYPES = ['broken', 'fixed'];
 
 function hashIp(req) {
@@ -58,7 +76,7 @@ function setCors(res) {
  */
 async function getActiveFlags(flags, now) {
   const active = await flags
-    .find({ clearedAt: null, until: { $gt: now } })
+    .find({ clearedAt: null, until: { $gt: now }, flaggedAt: { $gte: REPORTS_VALID_FROM } })
     .toArray();
 
   return active.reduce((acc, flag) => {
@@ -67,15 +85,35 @@ async function getActiveFlags(flags, now) {
   }, {});
 }
 
+/**
+ * True when broken reports are temporarily locked, i.e. some hour in the last day
+ * saw BROKEN_BURST_COUNT or more of them across the whole site.
+ */
+async function brokenReportsLocked(reports, now) {
+  const since = new Date(Math.max(now.getTime() - BROKEN_LOCKOUT_MS, REPORTS_VALID_FROM.getTime()));
+  const recent = await reports
+    .find({ type: 'broken', createdAt: { $gte: since } })
+    .project({ createdAt: 1 })
+    .sort({ createdAt: 1 })
+    .toArray();
+
+  for (let i = 0; i + BROKEN_BURST_COUNT - 1 < recent.length; i++) {
+    const spread = recent[i + BROKEN_BURST_COUNT - 1].createdAt - recent[i].createdAt;
+    if (spread <= BROKEN_BURST_WINDOW_MS) return true;
+  }
+  return false;
+}
+
 /** Distinct devices that filed `type` for a machine, within a cycle or window. */
 async function countDistinctDevices(reports, machineId, type, { cycleId, since }) {
   const filter = { machineId, type };
 
   if (cycleId) {
     filter.cycleId = cycleId;
+    filter.createdAt = { $gte: REPORTS_VALID_FROM };
   } else {
     filter.cycleId = null;
-    filter.createdAt = { $gte: since };
+    filter.createdAt = { $gte: new Date(Math.max(since.getTime(), REPORTS_VALID_FROM.getTime())) };
   }
 
   const devices = await reports.distinct('deviceId', filter);
@@ -98,7 +136,7 @@ export default async function handler(req, res) {
     // GET - report state for every machine, for the dashboard to render.
     if (req.method === 'GET') {
       const activeFlags = await getActiveFlags(flags, now);
-      const brokenSince = new Date(now.getTime() - BROKEN_WINDOW_MS);
+      const brokenSince = brokenCountingSince(now);
 
       // Pending broken reports (not yet part of a flagged cycle).
       const pending = await reports
@@ -164,6 +202,21 @@ export default async function handler(req, res) {
       const activeFlags = await getActiveFlags(flags, now);
       const activeFlag = activeFlags[machineId] || null;
 
+      // Accepted and discarded, with the counts unmoved, so a burst of reports
+      // looks like it worked but changes nothing.
+      if (type === 'broken' && (await brokenReportsLocked(reports, now))) {
+        const brokenCount = await countDistinctDevices(reports, machineId, 'broken', {
+          since: brokenCountingSince(now),
+        });
+        return res.status(200).json({
+          success: true,
+          machineId,
+          flagged: Boolean(activeFlag),
+          brokenCount,
+          threshold: BROKEN_THRESHOLD,
+        });
+      }
+
       if (type === 'fixed') {
         // Only meaningful while the machine is actually flagged.
         if (!activeFlag) {
@@ -220,13 +273,22 @@ export default async function handler(req, res) {
         });
       }
 
+      const brokenSince = brokenCountingSince(now);
+
+      // A pending report that has aged out (or predates the cutoff) would otherwise
+      // block this device forever, because the unique index makes the upsert below
+      // a no-op. Move it aside under its own cycleId, keeping its original data.
+      await reports.updateOne(
+        { machineId, type: 'broken', deviceId, cycleId: null, createdAt: { $lt: brokenSince } },
+        [{ $set: { cycleId: { $concat: ['expired:', { $toString: '$_id' }] } } }]
+      );
+
       await reports.updateOne(
         { machineId, type: 'broken', deviceId, cycleId: null },
         { $setOnInsert: { machineId, type: 'broken', deviceId, cycleId: null, ipHash, createdAt: now } },
         { upsert: true }
       );
 
-      const brokenSince = new Date(now.getTime() - BROKEN_WINDOW_MS);
       const brokenCount = await countDistinctDevices(reports, machineId, 'broken', {
         since: brokenSince,
       });
@@ -246,7 +308,7 @@ export default async function handler(req, res) {
         // Attach the reports that triggered this flag to the cycle, so they
         // stop counting toward any future one.
         await reports.updateMany(
-          { machineId, type: 'broken', cycleId: null },
+          { machineId, type: 'broken', cycleId: null, createdAt: { $gte: brokenSince } },
           { $set: { cycleId } }
         );
 
