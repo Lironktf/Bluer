@@ -74,7 +74,7 @@ export default function RoomForm({ editingRoom, onSave, onCancel }) {
               type="text"
               value={machineIds}
               onChange={(e) => setMachineIds(e.target.value)}
-              placeholder="e.g., a1-m1, a1-m2, a1-m3"
+              placeholder="e.g., sj-w1, sj-d1, sj-w2"
             />
             <small>Comma-separated list of machine IDs</small>
           </div>
