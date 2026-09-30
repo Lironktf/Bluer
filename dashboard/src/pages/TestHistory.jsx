@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { machineNumberFromId, typeForNumber } from '../utils/machineLabel';
+import { parseMachineId, TRIAL_MACHINE_IDS } from '../utils/machineLabel';
 import styles from './TestHistory.module.css';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://laun-dryer.vercel.app';
@@ -48,11 +48,11 @@ function formatStamp(iso) {
   });
 }
 
-// Sensor type follows the same odd/even convention the dashboard already uses.
+// Sensor type follows straight from the id: washers carry an INMP441, dryers an MPU6050.
 function sensorLabel(machineId) {
-  const number = machineNumberFromId(machineId);
-  if (number === null || number === undefined) return null;
-  return typeForNumber(number) === 'washer' ? 'INMP' : 'MPU';
+  const parsed = parseMachineId(machineId);
+  if (!parsed) return null;
+  return parsed.type === 'washer' ? 'INMP' : 'MPU';
 }
 
 function sensorText(r) {
@@ -84,7 +84,7 @@ export default function TestHistory() {
       const data = await response.json();
       if (!data.success) throw new Error(data.error || 'Request failed');
 
-      setRecords(data.records || []);
+      setRecords((data.records || []).filter((r) => TRIAL_MACHINE_IDS.includes(r.machineId)));
       setFetchedAt(new Date());
       setError(null);
     } catch (e) {
