@@ -31,34 +31,16 @@ const DEFAULT_PAIR_COUNT = 10;
 /** Parse an id, e.g. "sj-w3" -> { prefix: 'sj', type: 'washer', number: 3 }. */
 export function parseMachineId(machineId) {
   const match = /^([a-z]+)-([wd])(\d+)$/i.exec(machineId || '');
-  if (match) {
-    return {
-      prefix: match[1].toLowerCase(),
-      type: match[2].toLowerCase() === 'w' ? WASHER : DRYER,
-      number: parseInt(match[3], 10),
-    };
-  }
-  return parseLegacyMachineId(machineId);
-}
-
-// Transitional: the trial pair still runs the old a1-m19 / a1-m20 firmware, where
-// odd was a washer and the numbering ran backwards. Delete once every node is
-// reflashed onto the sj- scheme.
-function parseLegacyMachineId(machineId) {
-  const match = /^([a-z0-9]+)-m(\d+)$/i.exec(machineId || '');
   if (!match) return null;
-  const legacyNumber = parseInt(match[2], 10);
   return {
     prefix: match[1].toLowerCase(),
-    type: legacyNumber % 2 === 1 ? WASHER : DRYER,
-    number: 11 - Math.ceil(legacyNumber / 2),
-    legacy: true,
+    type: match[2].toLowerCase() === 'w' ? WASHER : DRYER,
+    number: parseInt(match[3], 10),
   };
 }
 
-// Nodes on the hardened firmware trial, old ids and new, so the diagnostics pages
-// keep working across the reflash. Everything else is hidden from /test.
-export const TRIAL_MACHINE_IDS = ['a1-m20', 'a1-m19', 'sj-d1', 'sj-w1'];
+// Every machine in the St Jerome's room. Only these appear on /test and /test/history.
+export const TRIAL_MACHINE_IDS = Array.from({ length: 10 }, (_, i) => [`sj-w${i + 1}`, `sj-d${i + 1}`]).flat();
 
 /** The number printed on the machine's sticker, e.g. "sj-w3" -> 3. */
 export function machineNumberFromId(machineId) {
