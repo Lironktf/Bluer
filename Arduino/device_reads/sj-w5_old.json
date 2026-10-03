@@ -1,0 +1,45 @@
+{
+  "firmware": {
+    "version": "4c00f0f",
+    "project": "arduino-lib-builder",
+    "time": "09:37:23",
+    "date": "Dec 18 2025",
+    "idf": "v5.5.1-931-g9bb7aa84fe"
+  },
+  "app_partition": "app0 @ 0x10000",
+  "source_sketch": "old_washer_bluer.ino variant",
+  "TIMER_FULL_MS": 1500000,
+  "MAX_CYCLE_MS": 2520000,
+  "FIRST_FILL_HIGH2": 68500,
+  "FIRST_FILL_bands": "either",
+  "WINDOW": 200,
+  "bands_hz": [
+    [
+      60,
+      600
+    ],
+    [
+      7875,
+      9750
+    ],
+    [
+      9750,
+      11625
+    ]
+  ],
+  "sendInterval": 300000,
+  "ble_payload_bytes": 2,
+  "method": "strings + sketch literal pool decoded; REFILL_HIGH, TIMER_REFILL_MS, door threshold confirmed by disassembly of loop()",
+  "read_at_utc": "2026-10-03 (partial read: DROM 0x3000 + IROM 0x8000 bytes)",
+  "source": "/dev/cu.usbserial-0001",
+  "partial_read_sha256": "77c8c2878a91eb7a0cdde4fd3d94380e760f847ee9b629cd628d1f25540d5603",
+  "mac": "b4:bf:e9:05:04:14",
+  "old_id": "a1-m11",
+  "new_id": "sj-w5",
+  "ble_name": "WASHER_A6",
+  "log_machine_id": "WASHER_NODE_A1",
+  "REFILL_HIGH": 32000,
+  "REFILL_bands": "either",
+  "TIMER_REFILL_MS": 630000,
+  "DOOR_DROP_LOWMID": 750000
+}

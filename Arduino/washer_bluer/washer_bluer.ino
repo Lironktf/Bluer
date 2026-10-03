@@ -8,8 +8,8 @@
 #include <esp_task_wdt.h>
 
 // Custom tracking string for the washer
-#define WASHER_BLE_NAME "WASHER_W1"        //VARIES: must equal the name the paired dryer filters on
-const char* machineId = "WASHER_NODE_W1";  //Doesnt  matter
+#define WASHER_BLE_NAME "WASHER_W6"        //VARIES: must equal the name the paired dryer filters on
+const char* machineId = "WASHER_NODE_W6";  //Doesnt  matter
 
 // Read by supervisorTask on core 0, written by loop() on core 1.
 volatile bool empty = true;
@@ -28,9 +28,9 @@ double high = 0.0;
 double high2 = 0.0;
 unsigned long cycleEndsAt = 0;                   // loops remaining in current cycle
 const unsigned long TIMER_FULL_MS = 1500000UL;   // 25 min, start of cycle, WallClock, consistant timing
-const unsigned long TIMER_REFILL_MS = 600000UL;  // 10 min 30 s Very accurate timing, perfect for at least the rightmost washer in tests
+const unsigned long TIMER_REFILL_MS = 630000UL;  // 10 min 30 s, per-device, see Arduino/MACHINES.md. Very accurate timing, perfect for at least the rightmost washer in tests
 const double FIRST_FILL_HIGH2 = 68500;          // either band, starts the cycle
-const double REFILL_HIGH = 32000;                // 7875–9750 band, this is a later water in, tops the timer back up
+const double REFILL_HIGH = 32000;                // per-device, see Arduino/MACHINES.md. either band, this is a later water in, tops the timer back up
 //For above, M1 max from machine next is 45000, test if all the water ins are above this day of installation
 unsigned long cycleStartedAt = 0;              // when the current cycle began
 const unsigned long MAX_CYCLE_MS = 2520000UL;  // 42 min hard cap
@@ -283,7 +283,7 @@ void loop() {
   high = (c_high > 0) ? (zone_high / c_high) : 0;
   high2 = (c_high2 > 0) ? (zone_high2 / c_high2) : 0;
 
-  if ((prevlowmid > (lowmid + 750000)) && !running && !doorclosed) {
+  if ((prevlowmid > (lowmid + 750000)) && !running && !doorclosed) {  // door drop, per-device, see Arduino/MACHINES.md
     doorclosed = true;
     empty = true;
     Serial.println("Door Closed! Now Empty");

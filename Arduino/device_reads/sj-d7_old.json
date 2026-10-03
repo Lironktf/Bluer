@@ -1,0 +1,43 @@
+{
+  "read_at_utc": "2026-10-03T19:01:58+00:00",
+  "source": "/dev/cu.usbserial-0001",
+  "mac": "b4:bf:e9:05:04:58",
+  "app_partition": "app0 @ 0x10000 (otadata seq=1 -> app0 (CRC not checked))",
+  "firmware": {
+    "version": "4c00f0f",
+    "project": "arduino-lib-builder",
+    "time": "09:37:23",
+    "date": "Dec 18 2025",
+    "idf": "v5.5.1-931-g9bb7aa84fe"
+  },
+  "segments_sha256": "3951363c320dc77889047e6a1fbc42af19fe7260a8e4ccb3264dc7fa94ad4c10",
+  "seconds": 19.2,
+  "warnings": [],
+  "id_strings_in_data": [
+    "a1-m7",
+    "a1-m8"
+  ],
+  "server_url": [
+    "https://laun-dryer.vercel.app/api/machines"
+  ],
+  "ble_names": [
+    "WASHER_A4"
+  ],
+  "float_globals": {
+    "0x3ffbdb6c": 0.65,
+    "0x3ffbdb70": 2.45,
+    "0x3ffc3234": 773.239,
+    "0x3ffc32c4": 196.345,
+    "0x3ffc32d4": 196.345,
+    "0x3ffc32e8": 196.345,
+    "0x3ffc35a8": 26.0,
+    "0x3ffc35ac": 24.0,
+    "0x3ffc35b0": 40.0,
+    "0x3ffc35b4": 32.0
+  },
+  "machine_id": "a1-m8",
+  "machine_id_method": "literal pool next to 'Machine ID' print",
+  "washer_machine_id": "a1-m7",
+  "DOORCLOSINGCHANGE": 0.65,
+  "DYRERONTHRESHHOLD": 2.45
+}

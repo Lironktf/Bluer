@@ -145,16 +145,16 @@ float
   activities[WINDOWTWO],  //Used to caluclates avg of last 15 seconds of activity
   deltastwo[WINDOWTHREE],
   activitysmallHistory[3],  //Holds history of last three small acitivties to capture the small activity 0.15s ago (3 x 50ms)
-  DYRERONTHRESHHOLD = 2.45,  //Thresholds
-  DOORCLOSINGCHANGE = 0.65,
+  DYRERONTHRESHHOLD = 2.45,  //Thresholds, per-device, see Arduino/MACHINES.md
+  DOORCLOSINGCHANGE = 0.55,  // per-device, see Arduino/MACHINES.md
   avg10 = 0,  //Average activity over last 15 seconds (easier way just always keep track of the average)
   sum10 = 0   //used to calucate a new average every second
   ;
 
 // Machine identification and server configuration
-const char* machineId = "sj-d1";  // VARIES
+const char* machineId = "sj-d4";  // VARIES
 const char* serverUrl = "https://laun-dryer.vercel.app/api/machines";
-const char* washerMachineId = "sj-w1";  //VARIES
+const char* washerMachineId = "sj-w4";  //VARIES
 
 // Timing for sending updates (send every 5 seconds)
 unsigned long lastSendTime = 0;
@@ -162,7 +162,7 @@ const unsigned long sendInterval = 300000;  // 5 min
 
 class MyAdvertisedDeviceCallbacks : public NimBLEScanCallbacks {
   void onResult(const NimBLEAdvertisedDevice* advertisedDevice) override {
-    if (advertisedDevice->getName() != "WASHER_W1") {  //VARIES: must equal WASHER_BLE_NAME in the paired washer sketch
+    if (advertisedDevice->getName() != "WASHER_W4") {  //VARIES: must equal WASHER_BLE_NAME in the paired washer sketch
       return;
     }
 
