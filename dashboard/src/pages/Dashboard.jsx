@@ -8,7 +8,7 @@ import RoomSearchAutocomplete from '../components/RoomSearchAutocomplete/RoomSea
 import { buildRoomSlots, roomPrefix } from '../utils/machineLabel';
 
 // Set false once the fleet is reflashed and the readings can be trusted again.
-const MAINTENANCE_MODE = true;
+const MAINTENANCE_MODE = false;
 import { getDeviceId } from '../utils/deviceId';
 import styles from './Dashboard.module.css';
 
