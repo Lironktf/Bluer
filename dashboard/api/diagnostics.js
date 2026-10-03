@@ -25,13 +25,16 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { machineId, since, limit } = req.query;
+    const { machineId, prefix, since, limit } = req.query;
 
     const parsedLimit = Math.min(parseInt(limit, 10) || DEFAULT_LIMIT, MAX_LIMIT);
 
     const filter = {};
     if (machineId) {
       filter.machineId = machineId;
+    } else if (typeof prefix === 'string' && /^[a-z]+$/i.test(prefix)) {
+      // Room prefix, e.g. "sj", so retired ids never use up the limit.
+      filter.machineId = { $regex: `^${prefix}-` };
     }
     if (since) {
       const sinceDate = new Date(since);
