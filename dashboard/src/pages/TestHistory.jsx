@@ -78,6 +78,7 @@ export default function TestHistory() {
       const url = new URL(`${API_BASE_URL}/api/diagnostics`);
       url.searchParams.set('limit', '20000');
       if (machineFilter) url.searchParams.set('machineId', machineFilter);
+      else url.searchParams.set('prefix', 'sj');
 
       const response = await fetch(url);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
