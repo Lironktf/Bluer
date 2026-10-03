@@ -42,7 +42,7 @@ const OFFLINE_TIMEOUT_MS = HEARTBEAT_INTERVAL_MS * MISSED_HEARTBEATS_BEFORE_OFFL
 
 // Nodes running the hardened firmware trial. Add an id here to start capturing
 // every heartbeat for it; remove it to stop. Empty list disables the capture.
-const DIAGNOSTIC_MACHINE_IDS = ['a1-m20', 'a1-m19', 'sj-d1', 'sj-w1'];
+const DIAGNOSTIC_MACHINE_IDS = Array.from({ length: 10 }, (_, i) => [`sj-w${i + 1}`, `sj-d${i + 1}`]).flat();
 
 export default async function handler(req, res) {
   // Enable CORS
