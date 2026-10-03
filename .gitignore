@@ -42,3 +42,9 @@ Thumbs.db
 
 # Flash dumps contain the eduroam password in plaintext
 *.bin
+
+# Arduino build output embeds secrets.h (eduroam credentials) in plaintext
+Arduino/**/build/
+*.elf
+__pycache__/
+*.pyc
