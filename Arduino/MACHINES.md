@@ -7,6 +7,37 @@ Naming: `sj-d<n>` / `sj-w<n>`, n = sticker number (see `dashboard/src/utils/mach
 Old scheme `a1-m1..a1-m20`: odd = washer, even = dryer, numbered the opposite way, so old pair k -> new pair 11-k.
 BLE name for pair n is `WASHER_W<n>`, set in both the washer sketch and the paired dryer's filter.
 
+## Quick reference: thresholds to flash
+
+Baseline is the generic sketch: dryer `2.45` / `0.65`; washer `TIMER_REFILL_MS 600000`, `FIRST_FILL_HIGH2 68500`,
+`REFILL_HIGH 32000` (either band), door drop `750000`. **Bold** = differs from baseline.
+
+| Machine | Old id / old BLE name | Thresholds | Source |
+|---|---|---|---|
+| sj-d1 | a1-m20 | 2.45 / 0.65 | operator: same as sketch |
+| sj-d2 | a1-m18 | 2.45 / 0.65 | operator |
+| sj-d3 | a1-m16 | 2.45 / 0.65 | operator |
+| sj-d4 | a1-m14 / WASHER_A7 | 2.45 / **0.55** | read-back (operator note says only sj-d10 differs; recheck) |
+| sj-d5 | a1-m12 / WASHER_A6 | 2.45 / 0.65 | read-back |
+| sj-d6 | a1-m10 / WASHER_A5 | 2.45 / 0.65 | read-back |
+| sj-d7 | a1-m8 / WASHER_A4 | 2.45 / 0.65 | read-back |
+| sj-d8 | a1-m6 / WASHER_A3 | 2.45 / 0.65 | read-back |
+| sj-d9 | a1-m4 / WASHER_A2 | 2.45 / 0.65 | read-back |
+| sj-d10 | a1-m2 / WASHER_A1 | 2.45 / **0.55** | read-back + operator |
+| sj-w1 | a1-m19 | baseline | operator: same as sketch |
+| sj-w2 | a1-m17 / WASHER_A9 | baseline | read-back |
+| sj-w3 | a1-m15 / WASHER_A8 | **TIMER_REFILL_MS 630000**, rest baseline | read-back |
+| sj-w4 | a1-m13 | **TIMER_REFILL_MS 630000**, rest baseline | operator |
+| sj-w5 | a1-m11 / WASHER_A6 | **TIMER_REFILL_MS 630000**, rest baseline | read-back |
+| sj-w6 | a1-m9 | **TIMER_REFILL_MS 630000**, rest baseline | operator |
+| sj-w7 | a1-m7 / WASHER_A4 | **TIMER_REFILL_MS 630000**, **door drop 550000**, rest baseline | read-back |
+| sj-w8 | a1-m5 | **TIMER_REFILL_MS 630000**, rest baseline | operator |
+| sj-w9 | a1-m3 | baseline | operator |
+| sj-w10 | a1-m1 / WASHER_A1 | **TIMER_REFILL_MS 630000**, **REFILL_HIGH 51500 (7875–9750 band only)**, rest baseline | read-back |
+
+"Operator" rows were reported by hand and only checked the values that differ; "read-back" rows were decoded
+from the board's old firmware (details per pair below).
+
 ## Pair 10 (sj-d10 / sj-w10, formerly a1-m2 / a1-m1)
 
 ### Dryer sj-d10 — ESP32 MAC 30:76:f5:f0:50:98
@@ -65,7 +96,7 @@ BLE name for pair n is `WASHER_W<n>`, set in both the washer sketch and the pair
 
 ### Washer sj-w8
 
-Not read yet.
+Not read back. Operator 2026-10-03 (old module a1-m5): only `TIMER_REFILL_MS` differs, `630000`.
 
 ## Pair 7 (sj-d7 / sj-w7, formerly a1-m8 / a1-m7)
 
@@ -121,7 +152,7 @@ Not read yet.
 
 ### Washer sj-w9
 
-Not read yet.
+Not read back. Operator 2026-10-03 (old module a1-m3): no values differ from the baseline sketch.
 
 ## Pair 6 (sj-d6 / sj-w6, formerly a1-m10 / a1-m9)
 
@@ -142,7 +173,7 @@ Not read yet.
 
 ### Washer sj-w6
 
-Not read yet.
+Not read back. Operator 2026-10-03 (old module a1-m9): only `TIMER_REFILL_MS` differs, `630000`.
 
 ## Pair 5 (sj-d5 / sj-w5, formerly a1-m12 / a1-m11)
 
@@ -198,7 +229,52 @@ Not read yet.
 
 ### Washer sj-w4
 
-Not read yet.
+Not read back. Operator 2026-10-03 (old module a1-m13): only `TIMER_REFILL_MS` differs, `630000`.
+
+## Pair 3 (sj-d3 / sj-w3, formerly a1-m16 / a1-m15)
+
+### Dryer sj-d3
+
+Not read back. Operator 2026-10-03: baseline `2.45` / `0.65`.
+
+### Washer sj-w3 — ESP32 MAC 70:4b:ca:9b:70:70
+
+| Setting | Old firmware (read back) |
+|---|---|
+| BLE name | WASHER_A8 |
+| TIMER_REFILL_MS | **630000** (10 min 30 s) |
+| FIRST_FILL_HIGH2 | 68500 |
+| REFILL_HIGH | 32000 |
+| Door-closed drop (lowmid) | 750000 |
+| TIMER_FULL_MS / MAX_CYCLE_MS / sendInterval | 1500000 / 2520000 / 300000 |
+
+- Read 2026-10-03 from a 2 MB dump, values decoded from the constant pool next to the 7875/9750/11625 band
+  edges. Number of bands REFILL_HIGH checks was not confirmed by disassembly.
+
+## Pair 2 (sj-d2 / sj-w2, formerly a1-m18 / a1-m17)
+
+### Dryer sj-d2
+
+Not read back. Operator 2026-10-03: baseline `2.45` / `0.65`.
+
+### Washer sj-w2
+
+| Setting | Old firmware (read back) |
+|---|---|
+| BLE name | WASHER_A9 |
+| TIMER_REFILL_MS | 600000 (10 min) |
+| FIRST_FILL_HIGH2 | 68500 |
+| REFILL_HIGH | 32000 |
+| Door-closed drop (lowmid) | 750000 |
+| TIMER_FULL_MS / MAX_CYCLE_MS / sendInterval | 1500000 / 2520000 / 300000 |
+
+- Read 2026-10-03 from a full 4 MB dump, same method as sj-w3. Band count for REFILL_HIGH not confirmed by
+  disassembly.
+
+## Pair 1 (sj-d1 / sj-w1, formerly a1-m20 / a1-m19)
+
+The firmware-trial pair: flashed with the hardened sketch 2026-09-22, so their old values were not read back.
+Operator 2026-10-03: both match the baseline sketch (dryer `2.45` / `0.65`; washer baseline).
 
 ## Reading a board's config fast
 
