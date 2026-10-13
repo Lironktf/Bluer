@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { parseMachineId, TRIAL_MACHINE_IDS } from '../utils/machineLabel';
+import { parseMachineId, trialLabel, TRIAL_MACHINE_IDS } from '../utils/machineLabel';
 import styles from './TestMachines.module.css';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://laun-dryer.vercel.app';
@@ -153,7 +153,7 @@ export default function TestMachines() {
 
                 return (
                   <tr key={id} className={stale ? styles.stale : undefined}>
-                    <td className={styles.id}>{id}</td>
+                    <td className={styles.id}>{trialLabel(id)}</td>
                     <td>{m.running ? 'yes' : 'no'}</td>
                     <td>{m.empty ? 'yes' : 'no'}</td>
                     <td>{formatAge(m.timeSinceUpdate)}</td>
