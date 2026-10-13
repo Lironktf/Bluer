@@ -59,6 +59,11 @@ export function labelForMachineId(machineId) {
   return `${parsed.type === WASHER ? 'Washer' : 'Dryer'} ${parsed.number}`;
 }
 
+/** Test pages: "sj-d1" -> "Dryer 1"; an id in any other format is shown as sent. */
+export function trialLabel(machineId) {
+  return parseMachineId(machineId)?.prefix === 'sj' ? labelForMachineId(machineId) : machineId;
+}
+
 export function roomPrefix(roomName) {
   return ROOM_PREFIXES[roomName] || null;
 }
