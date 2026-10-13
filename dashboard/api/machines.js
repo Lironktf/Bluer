@@ -40,9 +40,11 @@ const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
 const MISSED_HEARTBEATS_BEFORE_OFFLINE = 3;
 const OFFLINE_TIMEOUT_MS = HEARTBEAT_INTERVAL_MS * MISSED_HEARTBEATS_BEFORE_OFFLINE;
 
-// Nodes running the hardened firmware trial. Add an id here to start capturing
-// every heartbeat for it; remove it to stop. Empty list disables the capture.
+// Nodes shown on /test/history. Add an id here to start recording it; remove it to stop.
 const DIAGNOSTIC_MACHINE_IDS = Array.from({ length: 10 }, (_, i) => [`sj-w${i + 1}`, `sj-d${i + 1}`]).flat();
+
+// A heartbeat with nothing new is still recorded this often, to show the node is alive.
+const DIAGNOSTIC_CHECKIN_MS = 3 * 60 * 60 * 1000;
 
 export default async function handler(req, res) {
   // Enable CORS
@@ -119,7 +121,23 @@ export default async function handler(req, res) {
       if (typeof resetReason === 'number') updateData.resetReason = resetReason;
       if (typeof uptime === 'number') updateData.uptime = uptime;
       if (typeof freeHeap === 'number') updateData.freeHeap = freeHeap;
-      
+
+      let recordDiagnostic = false;
+      if (DIAGNOSTIC_MACHINE_IDS.includes(machineId)) {
+        const prev = currentMachine || {};
+        const lastRecordedAt = prev.lastDiagnosticAt ? new Date(prev.lastDiagnosticAt).getTime() : 0;
+        recordDiagnostic =
+          stateChanged ||
+          (prev.sensorState ?? null) !== (typeof sensorState === 'string' ? sensorState : null) ||
+          (prev.resetReason ?? null) !== (typeof resetReason === 'number' ? resetReason : null) ||
+          (prev.room ?? null) !== (roomName || null) ||
+          // Uptime going backwards is a reboot, even when the reset reason repeats.
+          (typeof uptime === 'number' && typeof prev.uptime === 'number' && uptime < prev.uptime) ||
+          (currentMachine && now - new Date(currentMachine.lastUpdate) >= OFFLINE_TIMEOUT_MS) ||
+          now.getTime() - lastRecordedAt >= DIAGNOSTIC_CHECKIN_MS;
+        if (recordDiagnostic) updateData.lastDiagnosticAt = now;
+      }
+
       // A relay POST carries no node diagnostics, because they belong to the dryer
       // doing the relaying. Clear those, and the superseded sensorOk, once a node
       // starts reporting sensorState.
@@ -142,9 +160,7 @@ export default async function handler(req, res) {
 
       await machines.updateOne({ machineId }, update, { upsert: true });
 
-      // Units under firmware trial: keep every heartbeat, not just state changes,
-      // so reboots and heap drift stay visible after the fact.
-      if (DIAGNOSTIC_MACHINE_IDS.includes(machineId)) {
+      if (recordDiagnostic) {
         const diagnostics = await getCollection('machineDiagnostics');
         await diagnostics.insertOne({
           machineId,
