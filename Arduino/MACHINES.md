@@ -38,6 +38,9 @@ Baseline is the generic sketch: dryer `2.45` / `0.65`; washer `TIMER_REFILL_MS 6
 "Operator" rows were reported by hand and only checked the values that differ; "read-back" rows were decoded
 from the board's old firmware (details per pair below).
 
+**Machines out of order (operator, 2026-10-08):** washers sj-w5, sj-w6, sj-w7. Their nodes are healthy; any
+running reports from them are false triggers.
+
 ## Pair 10 (sj-d10 / sj-w10, formerly a1-m2 / a1-m1)
 
 ### Dryer sj-d10 — ESP32 MAC 30:76:f5:f0:50:98
