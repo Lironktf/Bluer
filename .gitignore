@@ -7,6 +7,7 @@ dashboard/.env
 # Home test builds contain a plaintext WiFi password
 Arduino/*_home_test.ino
 Arduino/*hometest*.ino
+Arduino/**/*hometest*.ino
 
 # Node modules
 node_modules/
