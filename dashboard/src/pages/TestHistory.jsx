@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { parseMachineId, TRIAL_MACHINE_IDS } from '../utils/machineLabel';
+import { parseMachineId, trialLabel, TRIAL_MACHINE_IDS } from '../utils/machineLabel';
 import styles from './TestHistory.module.css';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://laun-dryer.vercel.app';
@@ -99,7 +99,9 @@ export default function TestHistory() {
     return () => clearInterval(interval);
   }, [refresh]);
 
-  const machineIds = [...new Set(records.map((r) => r.machineId))].sort();
+  const machineIds = [...new Set(records.map((r) => r.machineId))].sort((a, b) =>
+    trialLabel(a).localeCompare(trialLabel(b), undefined, { numeric: true })
+  );
 
   // Oldest first so the table reads top-to-bottom as the trial progressed.
   const rows = [...records].reverse();
@@ -121,7 +123,8 @@ export default function TestHistory() {
     <div className={styles.page}>
       <h1>Firmware trial log</h1>
       <p className={styles.sub}>
-        Every heartbeat received from the nodes under trial, oldest first. Refreshes every{' '}
+        A row is kept when any status changes, the node reboots or comes back online, and
+        otherwise every 3 hours to show it is still alive. Oldest first. Refreshes every{' '}
         {POLL_INTERVAL_MS / 1000}s.
         {fetchedAt && ` Last fetch ${fetchedAt.toLocaleTimeString()}.`}{' '}
         <Link to="/test">Back to live view</Link>
@@ -134,7 +137,7 @@ export default function TestHistory() {
             <option value="">all</option>
             {machineIds.map((id) => (
               <option key={id} value={id}>
-                {id}
+                {trialLabel(id)}
               </option>
             ))}
           </select>
@@ -174,7 +177,7 @@ export default function TestHistory() {
                 return (
                   <tr key={r._id} className={rebooted ? styles.reboot : undefined}>
                     <td>{formatStamp(r.timestamp)}</td>
-                    <td className={styles.id}>{r.machineId}</td>
+                    <td className={styles.id}>{trialLabel(r.machineId)}</td>
                     <td>{r.running ? 'yes' : 'no'}</td>
                     <td>{r.empty ? 'yes' : 'no'}</td>
                     <td className={sensorBad ? styles.bad : undefined}>
