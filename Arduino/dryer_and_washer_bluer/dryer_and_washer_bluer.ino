@@ -533,6 +533,7 @@ esp_err_t setup_i2s() {
     .use_apll = false
   };
   i2s_pin_config_t pin_config = {
+    .mck_io_num = I2S_PIN_NO_CHANGE,  // left at 0 it would drive MCLK onto GPIO 0 (BOOT)
     .bck_io_num = I2S_SCK,
     .ws_io_num = I2S_WS,
     .data_out_num = I2S_PIN_NO_CHANGE,
@@ -718,6 +719,7 @@ bool sendCustomStatusUpdate(const char* targetMachineId, bool isRunning, bool is
 #else
   client.setInsecure();
 #endif
+  client.setHandshakeTimeout(15);  // seconds; the 120 s default could trip the network stall guard
 
   HTTPClient http;
   http.setConnectTimeout(8000);
@@ -813,6 +815,8 @@ void serviceUploads() {
       lastDryerSendTime = millis();  // only on success, or the server TTL flaps
     }
   }
+
+  netHeartbeat = millis();
 
   if (!washerReportedOnce || wr != lastReportedWasherRunning || we != lastReportedWasherEmpty
       || micOk != lastReportedWasherMicOk || millis() - lastWasherSendTime >= sendInterval) {
@@ -925,9 +929,11 @@ void setup() {
   sensorHealthy = verifyMpu();
   DryerSerial.printf("[MPU] WHO_AM_I check: %s\n", sensorHealthy ? "ok" : "FAILED");
 
+  // No restart: that would take the dryer down too. washerStep() keeps retrying.
   if (setup_i2s() != ESP_OK) {
-    hardRestart("I2S would not start at boot");
+    micHealthy = false;
   }
+  publishWasher();
 
   // Registered once and only once: WiFi.onEvent() has no deduplication.
   WiFi.persistent(false);
