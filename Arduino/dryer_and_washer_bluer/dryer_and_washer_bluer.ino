@@ -6,9 +6,8 @@
 // Wiring (no shared pins):
 //   MPU6050  SDA -> GPIO 8, SCL -> GPIO 9, AD0 -> GND, VCC -> 3V3
 //   INMP441  SCK -> GPIO 4, WS -> GPIO 5, SD -> GPIO 6, L/R -> GND, VDD -> 3V3
-// Serial plotters, one per USB-C port:
-//   "USB"  port (Serial)  : dryer graph  Avg10, ActivitySmall  (+ node/WiFi log)
-//   "UART" port (Serial0) : washer graph Door, Avg_7875_9750, Avg_9750_11625
+// Serial Plotter on the USB-C port shows both sensors in one graph. Mic values are
+// scaled into the dryer's range: WasherWater x10000 (68500 -> 6.85), WasherDoor x1000000.
 #include <Wire.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -22,14 +21,14 @@
 #include "secrets.h"
 
 #if !CONFIG_IDF_TARGET_ESP32S3
-#error "This sketch is for the ESP32-S3 (pins and dual serial ports differ on other chips)"
+#error "This sketch is for the ESP32-S3: select an ESP32-S3 board (pins differ on other chips)"
 #endif
 #if !ARDUINO_USB_CDC_ON_BOOT
-#error "Set Tools > USB CDC On Boot > Enabled so the dryer and washer get separate serial ports"
+#error "Set Tools > USB CDC On Boot > Enabled so the log and plot come out of the USB-C port"
 #endif
 
-#define DryerSerial Serial    // native "USB" port
-#define WasherSerial Serial0  // "UART" port
+#define DryerSerial Serial
+#define WasherSerial Serial
 
 // Leave at 0 until you have confirmed a 200 with it set to 1: if the bundle is
 // unavailable every upload fails, which is worse than your original setInsecure().
@@ -160,6 +159,13 @@ double vImag[SAMPLES];
 int32_t i2s_buffer[SAMPLES];
 ArduinoFFT<double> FFT = ArduinoFFT<double>(vReal, vImag, SAMPLES, SAMPLE_RATE);
 
+// Latest washer readings, plotted by loop() on the same line as the dryer's.
+const float WATER_PLOT_SCALE = 10000.0f;
+const float DOOR_PLOT_SCALE = 1000000.0f;
+volatile float plotWasherDoor = 0;
+volatile float plotWasherWater1 = 0;
+volatile float plotWasherWater2 = 0;
+
 // ---------------- Shared between tasks ----------------
 // Each sensing task publishes a consistent snapshot here; the network task and
 // the supervisor only ever read these.
@@ -247,8 +253,7 @@ void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
 
 void hardRestart(const char* why) {
   DryerSerial.printf("[SUPERVISOR] Restart: %s\n", why);
-  WasherSerial.printf("[SUPERVISOR] Restart: %s\n", why);
-  WasherSerial.flush();
+  DryerSerial.flush();
   delay(50);
   esp_restart();
   // If esp_restart() ever wedges in a shutdown handler, the task watchdog fires.
@@ -691,8 +696,9 @@ void washerStep() {
     }
   }
 
-  WasherSerial.printf("Door_60-600Hz:%.2f,Avg_7875_9750:%.2f,Avg_9750_11625:%.2f\n",
-                      lowmid, actualAvgWater, actualAvgWater2);
+  plotWasherDoor = lowmid / DOOR_PLOT_SCALE;
+  plotWasherWater1 = actualAvgWater / WATER_PLOT_SCALE;
+  plotWasherWater2 = actualAvgWater2 / WATER_PLOT_SCALE;
 }
 
 void washerTask(void* parameter) {
@@ -879,6 +885,15 @@ void supervisorTask(void* parameter) {
 }
 
 // ---------------- Setup / dryer loop ----------------
+// One line per 50 ms with both sensors. The *Line series are the thresholds.
+void printPlotLine() {
+  DryerSerial.printf("DryerAvg10:%.2f,DryerActivitySmall:%.2f,WasherWater_7875_9750:%.2f,"
+                     "WasherWater_9750_11625:%.2f,WasherDoor:%.2f,"
+                     "DryerOnLine:%.2f,FirstFillLine:%.2f,RefillLine:%.2f\n",
+                     avg10, activitysmall, plotWasherWater1, plotWasherWater2, plotWasherDoor,
+                     DYRERONTHRESHHOLD, FIRST_FILL_HIGH2 / WATER_PLOT_SCALE, REFILL_HIGH / WATER_PLOT_SCALE);
+}
+
 void setup() {
 #if ARDUINO_USB_MODE
   DryerSerial.setTxBufferSize(2048);
@@ -887,8 +902,6 @@ void setup() {
 #if ARDUINO_USB_MODE
   DryerSerial.setTxTimeoutMs(0);  // never stall sampling when no laptop is plugged in
 #endif
-  WasherSerial.setTxBufferSize(2048);
-  WasherSerial.begin(115200);
   delay(500);
 
   nodeSalt = (uint32_t)(ESP.getEfuseMac() & 0xFFFFFF);
@@ -897,8 +910,6 @@ void setup() {
 
   DryerSerial.printf("\n=== Dryer + Washer Monitor === dryer %s, washer %s, reset reason %d\n",
                      dryerMachineId, washerMachineId, (int)esp_reset_reason());
-  WasherSerial.printf("\n=== Dryer + Washer Monitor (washer port) === washer %s, reset reason %d\n",
-                      washerMachineId, (int)esp_reset_reason());
 
   // Staggered boot so several nodes on one supply never draw inrush together.
   delay(nodeSalt % 12000);
@@ -953,6 +964,7 @@ void loop() {
       recoverI2cBus();
     }
     publishDryer();  // so the fault is still reported
+    printPlotLine();  // the washer graph keeps updating with the MPU unplugged
     delay(50);
     return;  // keep stale samples out of the activity window
   }
@@ -1012,7 +1024,6 @@ void loop() {
   dryerWasRunning = dryerRunning;
 
   publishDryer();
-
-  DryerSerial.printf("Avg10:%.2f,ActivitySmall:%.2f\n", avg10, activitysmall);
+  printPlotLine();
   delay(50);
 }
