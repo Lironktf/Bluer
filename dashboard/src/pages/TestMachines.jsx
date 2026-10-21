@@ -94,6 +94,37 @@ function sensorIsBad(m) {
   return m.sensorState === 'flat' || m.sensorState === 'noreply';
 }
 
+// A combined test board reports its dryer as TEST_D<n> and its washer as TEST_W<n>.
+function parseTestId(id) {
+  const match = /^TEST_([DW])(\d+)$/.exec(id);
+  if (!match) return null;
+  return { type: match[1] === 'D' ? 'dryer' : 'washer', number: parseInt(match[2], 10) };
+}
+
+function SensorCells({ m, label }) {
+  if (!m) {
+    return (
+      <>
+        <td>--</td>
+        <td>--</td>
+        <td>--</td>
+        <td>--</td>
+      </>
+    );
+  }
+  return (
+    <>
+      <td>{formatAge(m.timeSinceUpdate)}</td>
+      <td>{m.running ? 'yes' : 'no'}</td>
+      <td>{m.empty ? 'yes' : 'no'}</td>
+      <td className={sensorIsBad(m) ? styles.bad : undefined}>
+        {sensorText(m)}
+        {m.sensorState && m.sensorState !== 'unknown' && <span className={styles.room}> ({label})</span>}
+      </td>
+    </>
+  );
+}
+
 export default function TestMachines() {
   const [machines, setMachines] = useState({});
   const [fetchedAt, setFetchedAt] = useState(null);
@@ -116,6 +147,14 @@ export default function TestMachines() {
     .filter((id) => TRIAL_MACHINE_IDS.includes(id))
     .sort(comparePrefixDesc);
 
+  const testNodes = {};
+  for (const [id, m] of Object.entries(machines)) {
+    const parsed = parseTestId(id);
+    if (!parsed) continue;
+    testNodes[parsed.number] = { number: parsed.number, ...testNodes[parsed.number], [parsed.type]: m };
+  }
+  const nodeList = Object.values(testNodes).sort((a, b) => a.number - b.number);
+
   return (
     <div className={styles.page}>
       <h1>Sensor diagnostics</h1>
@@ -126,7 +165,57 @@ export default function TestMachines() {
         <Link to="/test/history">Firmware trial log</Link>
       </p>
 
-      {ids.length === 0 && <p className={styles.empty}>No machines reporting.</p>}
+      {ids.length === 0 && nodeList.length === 0 && <p className={styles.empty}>No machines reporting.</p>}
+
+      {nodeList.length > 0 && (
+        <>
+          <h2 className={styles.section}>Combined test nodes</h2>
+          <div className={`${styles.tableWrap} ${styles.nodeWrap}`}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Node</th>
+                  <th>Last reset</th>
+                  <th>Uptime</th>
+                  <th>Free heap</th>
+                  <th>Dryer last seen</th>
+                  <th>Dryer running</th>
+                  <th>Dryer empty</th>
+                  <th>Dryer sensor</th>
+                  <th>Washer last seen</th>
+                  <th>Washer running</th>
+                  <th>Washer empty</th>
+                  <th>Washer sensor</th>
+                </tr>
+              </thead>
+              <tbody>
+                {nodeList.map((n) => {
+                  // Both machines come from one board, so the freshest report speaks for the node.
+                  const latest = [n.dryer, n.washer]
+                    .filter(Boolean)
+                    .sort((a, b) => a.timeSinceUpdate - b.timeSinceUpdate)[0];
+                  const stale = latest.timeSinceUpdate > 15 * 60 * 1000;
+
+                  return (
+                    <tr key={n.number} className={stale ? styles.stale : undefined}>
+                      <td className={styles.id}>TEST Node {n.number}</td>
+                      <td className={latest.resetReason === 9 ? styles.bad : undefined}>
+                        {latest.resetReason === null || latest.resetReason === undefined
+                          ? '--'
+                          : `${RESET_REASONS[latest.resetReason] || latest.resetReason} (${latest.resetReason})`}
+                      </td>
+                      <td>{formatUptime(latest.uptime)}</td>
+                      <td>{formatHeap(latest.freeHeap)}</td>
+                      <SensorCells m={n.dryer} label="MPU" />
+                      <SensorCells m={n.washer} label="INMP" />
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
 
       {ids.length > 0 && (
         <div className={styles.tableWrap}>
