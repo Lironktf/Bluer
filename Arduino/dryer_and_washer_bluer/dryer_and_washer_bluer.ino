@@ -885,13 +885,15 @@ void supervisorTask(void* parameter) {
 }
 
 // ---------------- Setup / dryer loop ----------------
-// One line per 50 ms with both sensors. The *Line series are the thresholds.
+// One line per 50 ms with both sensors. The *Line series are the thresholds; states are 0/1.
 void printPlotLine() {
   DryerSerial.printf("DryerAvg10:%.2f,DryerActivitySmall:%.2f,WasherWater_7875_9750:%.2f,"
                      "WasherWater_9750_11625:%.2f,WasherDoor:%.2f,"
-                     "DryerOnLine:%.2f,FirstFillLine:%.2f,RefillLine:%.2f\n",
+                     "FirstFillLine:%.2f,RefillLine:%.2f,"
+                     "DryerRunning:%d,DryerEmpty:%d,WasherRunning:%d,WasherEmpty:%d\n",
                      avg10, activitysmall, plotWasherWater1, plotWasherWater2, plotWasherDoor,
-                     DYRERONTHRESHHOLD, FIRST_FILL_HIGH2 / WATER_PLOT_SCALE, REFILL_HIGH / WATER_PLOT_SCALE);
+                     FIRST_FILL_HIGH2 / WATER_PLOT_SCALE, REFILL_HIGH / WATER_PLOT_SCALE,
+                     dryerRunning, dryerEmpty, pubWasherRunning, pubWasherEmpty);
 }
 
 void setup() {
