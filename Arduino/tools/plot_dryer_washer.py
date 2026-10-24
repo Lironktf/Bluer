@@ -20,15 +20,21 @@ from serial.tools import list_ports
 from matplotlib.animation import FuncAnimation
 
 HISTORY = 1200  # samples kept on screen: 60 s at one line per 50 ms
-WASHER_YMAX = 80000  # values above this are drawn flat at the top and flagged in the legend
+DRYER_YMAX = 15  # fixed axes; values above are drawn flat at the top and flagged in the legend
+WASHER_YMAX = 80000
 ESPRESSIF_VID = 0x303A  # the ESP32-S3's own USB port
 
-DRYER_KEYS = ["DryerAvg10", "DryerActivitySmall", "DryerOnLine"]
+DRYER_KEYS = ["DryerAvg10", "DryerActivitySmall", "DryerRunning", "DryerEmpty"]
 WASHER_KEYS = ["WasherWater_7875_9750", "WasherWater_9750_11625", "WasherDoor",
-               "FirstFillLine", "RefillLine"]
+               "FirstFillLine", "RefillLine", "WasherRunning", "WasherEmpty"]
 # Undo the sketch's plot scaling so the washer graph shows the firmware's real numbers.
 UNSCALE = {"WasherWater_7875_9750": 10000, "WasherWater_9750_11625": 10000,
            "FirstFillLine": 10000, "RefillLine": 10000, "WasherDoor": 1000000}
+# 0/1 states drawn as flat lines: (height when false, height when true).
+STATE_LEVELS = {"DryerRunning": (1, 14), "DryerEmpty": (1.5, 14.5),
+                "WasherRunning": (2000, 75000), "WasherEmpty": (3500, 76500)}
+# Drawn at value/divisor so it fits the axis; the legend still reports the true value.
+DISPLAY_DIVISOR = {"WasherDoor": 10}
 
 series = {k: deque(maxlen=HISTORY) for k in DRYER_KEYS + WASHER_KEYS}
 lock = threading.Lock()
@@ -83,7 +89,10 @@ def reader(port):
                     stats["plot"] += 1
                     with lock:
                         for key in series:
-                            series[key].append(values.get(key, float("nan")) * UNSCALE.get(key, 1))
+                            v = values.get(key, float("nan"))
+                            if key in STATE_LEVELS and v == v:
+                                v = STATE_LEVELS[key][1 if v >= 0.5 else 0]
+                            series[key].append(v * UNSCALE.get(key, 1))
         except (serial.SerialException, OSError) as e:
             stats["status"] = "disconnected"
             print(f"Port problem: {e}")
@@ -102,8 +111,11 @@ def main():
     for ax, keys, title in ((ax_dryer, DRYER_KEYS, "Dryer (MPU6050)"),
                             (ax_washer, WASHER_KEYS, "Washer (INMP441), real units")):
         for key in keys:
-            style = "--" if key.endswith("Line") else "-"
-            (lines[key],) = ax.plot([], [], style, label=key)
+            if key in STATE_LEVELS:
+                (lines[key],) = ax.plot([], [], "-", linewidth=2, label=key)
+            else:
+                style = "--" if key.endswith("Line") else "-"
+                (lines[key],) = ax.plot([], [], style, label=key)
         ax.set_title(title)
         ax.legend(loc="upper left", fontsize="small")
         ax.grid(True, alpha=0.3)
@@ -112,22 +124,18 @@ def main():
     def update(_):
         with lock:
             snapshot = {k: list(v) for k, v in series.items()}
-        for key in DRYER_KEYS:
-            lines[key].set_data(range(len(snapshot[key])), snapshot[key])
-        for key in WASHER_KEYS:
-            data = snapshot[key]
-            lines[key].set_data(range(len(data)), [min(v, WASHER_YMAX) for v in data])
-            latest = data[-1] if data else float("nan")
-            lines[key].set_label(f"{key}  ABOVE {WASHER_YMAX:,} (now {latest:,.0f})"
-                                 if latest > WASHER_YMAX else key)
-        ax_washer.legend(loc="upper left", fontsize="small")
-
-        ax_dryer.set_xlim(0, HISTORY)
-        # Fixed 0-10 so small wiggles don't fill the screen; grows only if a value goes above 10.
-        peak = max((v for k in DRYER_KEYS for v in snapshot[k] if v == v), default=0)
-        ax_dryer.set_ylim(0, max(10, peak * 1.1))
-        ax_washer.set_xlim(0, HISTORY)
-        ax_washer.set_ylim(0, WASHER_YMAX * 1.02)  # small headroom so a capped line stays visible
+        for ax, keys, ymax in ((ax_dryer, DRYER_KEYS, DRYER_YMAX), (ax_washer, WASHER_KEYS, WASHER_YMAX)):
+            for key in keys:
+                data = snapshot[key]
+                div = DISPLAY_DIVISOR.get(key, 1)
+                lines[key].set_data(range(len(data)), [min(v / div, ymax) for v in data])
+                latest = data[-1] if data else float("nan")
+                name = f"{key} (shown /{div})" if div != 1 else key
+                lines[key].set_label(f"{name}  ABOVE {ymax * div:,} (now {latest:,.2f})"
+                                     if latest / div > ymax else name)
+            ax.legend(loc="upper left", fontsize="small")
+            ax.set_xlim(0, HISTORY)
+            ax.set_ylim(0, ymax * 1.02)  # small headroom so a capped line stays visible
         fig.suptitle(f"{port}: {stats['status']}, plot lines received: {stats['plot']}, "
                      f"other lines: {stats['other']}", fontsize="small")
         return list(lines.values())
