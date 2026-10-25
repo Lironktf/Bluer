@@ -38,7 +38,7 @@ DISPLAY_DIVISOR = {"WasherDoor": 10}
 
 series = {k: deque(maxlen=HISTORY) for k in DRYER_KEYS + WASHER_KEYS}
 lock = threading.Lock()
-stats = {"plot": 0, "other": 0, "status": "connecting"}
+stats = {"plot": 0, "other": 0, "status": "connecting", "missing": []}
 
 
 def find_port():
@@ -87,6 +87,7 @@ def reader(port):
                         print(line)  # status and WiFi messages go to the terminal
                         continue
                     stats["plot"] += 1
+                    stats["missing"] = [k for k in series if k not in values]
                     with lock:
                         for key in series:
                             v = values.get(key, float("nan"))
@@ -136,8 +137,12 @@ def main():
             ax.legend(loc="upper left", fontsize="small")
             ax.set_xlim(0, HISTORY)
             ax.set_ylim(0, ymax * 1.02)  # small headroom so a capped line stays visible
+        missing = stats["missing"]
+        warning = (f"\nBoard is not sending: {', '.join(missing)} (re-upload the latest sketch)"
+                   if missing else "")
         fig.suptitle(f"{port}: {stats['status']}, plot lines received: {stats['plot']}, "
-                     f"other lines: {stats['other']}", fontsize="small")
+                     f"other lines: {stats['other']}{warning}", fontsize="small",
+                     color="red" if missing else "black")
         return list(lines.values())
 
     _anim = FuncAnimation(fig, update, interval=200, cache_frame_data=False)
