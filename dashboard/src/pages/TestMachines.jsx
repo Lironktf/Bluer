@@ -162,7 +162,8 @@ export default function TestMachines() {
         The nodes currently on the hardened firmware trial. Refreshes every{' '}
         {POLL_INTERVAL_MS / 1000}s.
         {fetchedAt && ` Last fetch ${fetchedAt.toLocaleTimeString()}.`}{' '}
-        <Link to="/test/history">Firmware trial log</Link>
+        <Link to="/test/history">Firmware trial log</Link> · <Link to="/test/nodes">Node settings</Link> ·{' '}
+        <Link to="/test/live">Live readings</Link>
       </p>
 
       {ids.length === 0 && nodeList.length === 0 && <p className={styles.empty}>No machines reporting.</p>}
