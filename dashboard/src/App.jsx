@@ -8,6 +8,8 @@ import About from './pages/About';
 import MyRooms from './pages/MyRooms';
 import TestMachines from './pages/TestMachines';
 import TestHistory from './pages/TestHistory';
+import TestNodes from './pages/TestNodes';
+import TestLive from './pages/TestLive';
 
 function App() {
   return (
@@ -20,6 +22,8 @@ function App() {
         {/* Deliberately absent from Navigation: internal sensor diagnostics. */}
         <Route path="/test" element={<TestMachines />} />
         <Route path="/test/history" element={<TestHistory />} />
+        <Route path="/test/nodes" element={<TestNodes />} />
+        <Route path="/test/live" element={<TestLive />} />
       </Routes>
 
       <Footer />
