@@ -1,6 +1,7 @@
 // Vercel Serverless Function for machine status (handles POST and GET)
 // Uses MongoDB for persistent storage with state history tracking
 import { getCollection } from './lib/mongodb.js';
+import { nodeConfigForReport } from './diagnostics.js';
 
 /**
  * Collections:
@@ -65,10 +66,11 @@ export default async function handler(req, res) {
   try {
     // Handle POST - ESP32 sending status update
     if (req.method === 'POST') {
-      const { machineId, room, running, empty, sensorState, resetReason, uptime, freeHeap } = req.body;
+      const { machineId, room, running, empty, sensorState, resetReason, uptime, freeHeap, configVersion } = req.body;
 
       // Validate required fields
-      if (!machineId || typeof running !== 'boolean' || typeof empty !== 'boolean') {
+      // A non-string machineId (e.g. {"$ne": null}) would act as a database query operator.
+      if (typeof machineId !== 'string' || !machineId || typeof running !== 'boolean' || typeof empty !== 'boolean') {
         return res.status(400).json({
           success: false,
           error: 'Missing required fields: machineId, running, empty'
@@ -192,11 +194,20 @@ export default async function handler(req, res) {
         console.log(`📊 [${machineId}] Heartbeat - No state change`);
       }
 
+      // Thresholds and test mode ride on the reply, so nodes never need a second request.
+      let nodeReply = {};
+      try {
+        nodeReply = await nodeConfigForReport(machineId, configVersion);
+      } catch (error) {
+        console.error(`⚠️ [${machineId}] Node config lookup failed:`, error.message);
+      }
+
       return res.status(200).json({
         success: true,
         machineId,
         received: { running, empty },
-        stateChanged
+        stateChanged,
+        ...nodeReply
       });
     }
 
