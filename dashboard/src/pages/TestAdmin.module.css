@@ -236,11 +236,12 @@
 
 .legend .runKey {
     height: 10px;
-    background: #dcfce7;
+    background: rgba(34, 197, 94, 0.3);
 }
 
 .runShade {
-    fill: #dcfce7;
+    fill: #22c55e;
+    fill-opacity: 0.22;
 }
 
 .axis {
