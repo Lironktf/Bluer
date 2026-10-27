@@ -6,7 +6,10 @@ import styles from './TestAdmin.module.css';
 
 const POLL_INTERVAL_MS = 5000;
 const SUMMARY_SECONDS = 15;
-const WINDOWS = [5, 15, 60];
+const FETCH_MINUTES = 15; // the table covers this; graphs show 1/10 of it
+const CHART_MS = (FETCH_MINUTES * 60000) / 10;
+const DRYER_Y_CAP = 15;
+const WASHER_Y_CAP = 150000;
 
 // One sample per second from the node, while test mode is on:
 //   dAvg10        dryer avg10 (what the dryer-on threshold is compared to)
@@ -18,6 +21,24 @@ const WINDOWS = [5, 15, 60];
 //   dRunning dEmpty wRunning wEmpty  states, 0/1
 
 const fmt = (v, digits = 2) => (typeof v === 'number' ? v.toLocaleString(undefined, { maximumFractionDigits: digits }) : '--');
+
+// Merges consecutive running seconds into one block, so the shading has no seams.
+function runSpans(samples, key) {
+  const spans = [];
+  let current = null;
+  for (const s of samples) {
+    const t = new Date(s.ts).getTime();
+    if (s[key] !== 1) {
+      current = null;
+    } else if (current && t - current.end <= 1500) {
+      current.end = t + 1000;
+    } else {
+      current = { start: t, end: t + 1000 };
+      spans.push(current);
+    }
+  }
+  return spans;
+}
 
 function maxOf(rows, key) {
   const values = rows.map((r) => r[key]).filter((v) => typeof v === 'number');
@@ -63,19 +84,21 @@ function summarize(samples) {
     }));
 }
 
-/** Simple time chart: lines for readings, dashed lines for thresholds, shading while running. */
-function Chart({ title, samples, series, thresholds: allThresholds, runningKey, start, end }) {
+/** Simple time chart: lines for readings, dashed lines for thresholds, shading while running.
+ *  With yCap, the axis is fixed and anything higher is drawn flat along the top. */
+function Chart({ title, samples: allSamples, series, thresholds: allThresholds, runningKey, start, end, yCap }) {
   const W = 1000;
   const H = 200;
+  const TOP = 4; // keeps a line capped at the top edge visible
   const span = Math.max(end - start, 1);
   const thresholds = allThresholds.filter((t) => typeof t.value === 'number');
+  const samples = allSamples.filter((s) => new Date(s.ts).getTime() >= start - 1000);
 
   const values = samples.flatMap((s) => series.map((d) => s[d.key])).filter((v) => typeof v === 'number');
-  const yMax = Math.max(1e-6, ...values, ...thresholds.map((t) => t.value)) * 1.15;
+  const yMax = yCap ?? Math.max(1e-6, ...values, ...thresholds.map((t) => t.value)) * 1.15;
 
   const x = (t) => ((t - start) / span) * W;
-  const y = (v) => H - (Math.min(v, yMax) / yMax) * H;
-  const secondWidth = Math.max((1000 / span) * W, 1);
+  const y = (v) => H - (Math.min(v, yMax) / yMax) * (H - TOP);
 
   return (
     <figure className={styles.chart}>
@@ -92,9 +115,10 @@ function Chart({ title, samples, series, thresholds: allThresholds, runningKey, 
         </span>
       </figcaption>
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={title}>
-        {samples.filter((s) => s[runningKey] === 1).map((s) => (
-          <rect key={s._id} x={x(new Date(s.ts).getTime())} y={0} width={secondWidth} height={H} className={styles.runShade} />
-        ))}
+        {runSpans(samples, runningKey).map((r) => {
+          const x0 = x(Math.max(r.start, start));
+          return <rect key={r.start} x={x0} y={0} width={Math.max(x(Math.min(r.end, end)) - x0, 1)} height={H} className={styles.runShade} />;
+        })}
         {thresholds.map((t) => (
           <line key={t.label} x1={0} x2={W} y1={y(t.value)} y2={y(t.value)} stroke={t.color} strokeDasharray="8 6" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
         ))}
@@ -114,7 +138,7 @@ function Chart({ title, samples, series, thresholds: allThresholds, runningKey, 
       </svg>
       <div className={styles.axis}>
         <span>{new Date(start).toLocaleTimeString()}</span>
-        <span>max shown {fmt(yMax, 0)}</span>
+        <span>{yCap ? `top ${fmt(yCap, 0)} (higher values drawn flat at the top)` : `max shown ${fmt(yMax, 0)}`}</span>
         <span>{new Date(end).toLocaleTimeString()}</span>
       </div>
     </figure>
@@ -124,7 +148,6 @@ function Chart({ title, samples, series, thresholds: allThresholds, runningKey, 
 function Live({ lock }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const nodeId = searchParams.get('node') || '';
-  const [minutes, setMinutes] = useState(15);
   const [nodes, setNodes] = useState([]);
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -139,7 +162,7 @@ function Live({ lock }) {
 
   const loadTelemetry = useCallback(async () => {
     if (!nodeId) return;
-    const query = `kind=telemetry&nodeId=${encodeURIComponent(nodeId)}&minutes=${minutes}`;
+    const query = `kind=telemetry&nodeId=${encodeURIComponent(nodeId)}&minutes=${FETCH_MINUTES}`;
     currentQuery.current = query;
     const { ok, status, data: d } = await adminFetch(query);
     // A reply for a node or window the user has since switched away from is dropped.
@@ -151,7 +174,7 @@ function Live({ lock }) {
     } else {
       setError(d?.error || `HTTP ${status}`);
     }
-  }, [nodeId, minutes, lock]);
+  }, [nodeId, lock]);
 
   useEffect(() => {
     loadNodes();
@@ -168,8 +191,11 @@ function Live({ lock }) {
   const summaries = useMemo(() => summarize(samples), [samples]);
   const t = data?.thresholds || {};
   const latest = samples[samples.length - 1];
-  const end = Date.now();
-  const start = end - minutes * 60000;
+  // Fills left to right from the first reading, then scrolls with the newest one.
+  const firstTs = samples.length ? new Date(samples[0].ts).getTime() : Date.now();
+  const lastTs = latest ? new Date(latest.ts).getTime() + 1000 : Date.now();
+  const end = Math.max(firstTs + CHART_MS, lastTs);
+  const start = end - CHART_MS;
 
   const setTestMode = async (on) => {
     setBusy(true);
@@ -199,14 +225,6 @@ function Live({ lock }) {
               <option key={n.nodeId} value={n.nodeId}>
                 {nodeLabel(n.nodeId)}{n.testMode ? ' (test mode on)' : ''}
               </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Show last:{' '}
-          <select value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}>
-            {WINDOWS.map((m) => (
-              <option key={m} value={m}>{m} min</option>
             ))}
           </select>
         </label>
@@ -253,6 +271,7 @@ function Live({ lock }) {
             start={start}
             end={end}
             runningKey="dRunning"
+            yCap={DRYER_Y_CAP}
             series={[
               { key: 'dAvg10', label: 'avg10', color: '#2563eb' },
               { key: 'dDoorJumpMax', label: 'door jump', color: '#7c3aed' },
@@ -268,6 +287,7 @@ function Live({ lock }) {
             start={start}
             end={end}
             runningKey="wRunning"
+            yCap={WASHER_Y_CAP}
             series={[
               { key: 'wWater1Max', label: 'water 7.9–9.8 kHz', color: '#2563eb' },
               { key: 'wWater2Max', label: 'water 9.8–11.6 kHz', color: '#0d9488' },
@@ -275,6 +295,19 @@ function Live({ lock }) {
             thresholds={[
               { label: 'first fill', value: t.washerFirstFill, color: '#dc2626' },
               { label: 'refill', value: t.washerRefill, color: '#d97706' },
+            ]}
+          />
+          <Chart
+            title="Washer door"
+            samples={samples}
+            start={start}
+            end={end}
+            runningKey="wRunning"
+            series={[
+              { key: 'wDoorDropMax', label: '60–600 Hz drop (max per second)', color: '#7c3aed' },
+            ]}
+            thresholds={[
+              { label: 'door drop (marks empty)', value: t.washerDoorDrop, color: '#dc2626' },
             ]}
           />
 
