@@ -21,18 +21,15 @@ from matplotlib.animation import FuncAnimation
 
 HISTORY = 1200  # samples kept on screen: 60 s at one line per 50 ms
 DRYER_YMAX = 15  # fixed axes; values above are drawn flat at the top and flagged in the legend
-WASHER_YMAX = 80000
+WASHER_YMAX = 150000
 ESPRESSIF_VID = 0x303A  # the ESP32-S3's own USB port
 
 DRYER_KEYS = ["DryerAvg10", "DryerActivitySmall", "DryerRunning", "DryerEmpty"]
 WASHER_KEYS = ["WasherWater_7875_9750", "WasherWater_9750_11625", "WasherDoor",
                "FirstFillLine", "RefillLine", "WasherRunning", "WasherEmpty"]
-# Undo the sketch's plot scaling so the washer graph shows the firmware's real numbers.
-UNSCALE = {"WasherWater_7875_9750": 10000, "WasherWater_9750_11625": 10000,
-           "FirstFillLine": 10000, "RefillLine": 10000, "WasherDoor": 1000000}
 # 0/1 states drawn as flat lines: (height when false, height when true).
 STATE_LEVELS = {"DryerRunning": (1, 14), "DryerEmpty": (1.5, 14.5),
-                "WasherRunning": (2000, 75000), "WasherEmpty": (3500, 76500)}
+                "WasherRunning": (4000, 140000), "WasherEmpty": (7000, 143000)}
 # Drawn at value/divisor so it fits the axis; the legend still reports the true value.
 DISPLAY_DIVISOR = {"WasherDoor": 10}
 
@@ -93,7 +90,7 @@ def reader(port):
                             v = values.get(key, float("nan"))
                             if key in STATE_LEVELS and v == v:
                                 v = STATE_LEVELS[key][1 if v >= 0.5 else 0]
-                            series[key].append(v * UNSCALE.get(key, 1))
+                            series[key].append(v)
         except (serial.SerialException, OSError) as e:
             stats["status"] = "disconnected"
             print(f"Port problem: {e}")
