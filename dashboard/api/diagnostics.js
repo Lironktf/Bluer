@@ -1,19 +1,17 @@
 // Vercel Serverless Function for test tooling:
 //  - GET  (no kind)          raw heartbeat samples for /test/history (unchanged)
-//  - GET  ?kind=nodes        every node's thresholds, history and test mode      [password]
+//  - GET  ?kind=auth         validate the node settings password                [password]
+//  - GET  ?kind=nodes        every node's thresholds, history and test mode
 //  - PUT  ?kind=config       save a node's thresholds                            [password]
-//  - PUT  ?kind=testmode     switch a node's live-readings test mode on or off   [password]
+//  - PUT  ?kind=testmode     switch a node's live-readings test mode on or off
 //  - POST ?kind=telemetry    a node uploads per-second readings while in test mode
-//  - GET  ?kind=telemetry    readings for /test/live                             [password]
+//  - GET  ?kind=telemetry    readings for /test/live
 // Kept in this one file on purpose: every file under api/ is a separate Vercel function.
 import crypto from 'crypto';
 import { getCollection } from './lib/mongodb.js';
 
 const DEFAULT_LIMIT = 2000;
 const MAX_LIMIT = 20000;
-// Set true and restore NODE_ADMIN_PASSWORD in Vercel to protect the admin endpoints.
-const ADMIN_PASSWORD_ENABLED = false;
-
 // Thresholds a node follows, with the range a saved value must fall in.
 const THRESHOLD_LIMITS = {
   dryerOnThreshold: [0.1, 50],
@@ -409,9 +407,10 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && !kind) return await readHeartbeats(req, res);
     if (req.method === 'POST' && kind === 'telemetry') return await receiveTelemetry(req, res);
 
-    // Password protection is temporarily disabled; uncomment the next line to restore it.
-    // if (!(await checkAdmin(req, res))) return;
-    if (ADMIN_PASSWORD_ENABLED && !(await checkAdmin(req, res))) return;
+    if (kind === 'auth' || kind === 'config') {
+      if (!(await checkAdmin(req, res))) return;
+    }
+    if (req.method === 'GET' && kind === 'auth') return res.status(200).json({ success: true });
     if (req.method === 'GET' && kind === 'nodes') return await listNodes(res);
     if (req.method === 'PUT' && kind === 'config') return await saveConfig(req, res);
     if (req.method === 'PUT' && kind === 'testmode') return await setTestMode(req, res);
