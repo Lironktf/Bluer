@@ -2,13 +2,10 @@ import { useState, useCallback } from 'react';
 import { adminFetch, getAdminPassword, setAdminPassword } from '../../utils/adminApi';
 import styles from './PasswordGate.module.css';
 
-// Set true and restore NODE_ADMIN_PASSWORD in Vercel to re-enable the gate.
-const PASSWORD_PROTECTION_ENABLED = false;
-
 /** Renders children only once the server has accepted the password. */
 export default function PasswordGate({ children }) {
-  const [unlocked, setUnlocked] = useState(Boolean(getAdminPassword()));
-  const [value, setValue] = useState('');
+  const [unlocked, setUnlocked] = useState(false);
+  const [value, setValue] = useState(getAdminPassword());
   const [error, setError] = useState(null);
   const [checking, setChecking] = useState(false);
 
@@ -17,10 +14,6 @@ export default function PasswordGate({ children }) {
     setAdminPassword('');
     setUnlocked(false);
   }, []);
-
-  if (!PASSWORD_PROTECTION_ENABLED) {
-    return children({ lock: () => {} });
-  }
 
   if (unlocked && getAdminPassword()) {
     return children({ lock });
@@ -31,7 +24,7 @@ export default function PasswordGate({ children }) {
     setChecking(true);
     setError(null);
     setAdminPassword(value.trim());
-    const { ok, status, data } = await adminFetch('kind=nodes');
+    const { ok, status, data } = await adminFetch('kind=auth');
     setChecking(false);
     if (ok) {
       setUnlocked(true);
@@ -47,7 +40,6 @@ export default function PasswordGate({ children }) {
       <input
         id="node-admin-password"
         type="password"
-        inputMode="numeric"
         autoComplete="current-password"
         value={value}
         onChange={(e) => setValue(e.target.value)}
