@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import PasswordGate from '../components/PasswordGate/PasswordGate';
 import { adminFetch, formatAgo, formatRemaining, nodeLabel } from '../utils/adminApi';
 import styles from './TestAdmin.module.css';
 
 const POLL_INTERVAL_MS = 5000;
+const publicPageLock = () => {};
 const SUMMARY_SECONDS = 15;
 const FETCH_MINUTES = 15; // the table covers this; graphs show 1/10 of it
 const CHART_MS = (FETCH_MINUTES * 60000) / 10;
@@ -367,7 +367,7 @@ export default function TestLive() {
         Per-second readings from a node in test mode, summarized every {SUMMARY_SECONDS} s. Refreshes every{' '}
         {POLL_INTERVAL_MS / 1000}s. <Link to="/test/nodes">Node settings</Link> · <Link to="/test">Sensor diagnostics</Link>
       </p>
-      <PasswordGate>{({ lock }) => <Live lock={lock} />}</PasswordGate>
+      <Live lock={publicPageLock} />
     </div>
   );
 }
