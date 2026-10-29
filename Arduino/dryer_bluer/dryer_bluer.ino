@@ -188,7 +188,7 @@ const char* pubSensorState = "ok";
 const uint8_t LINK_LEN = 27;
 const uint8_t ST_RUNNING = 0x01, ST_EMPTY = 0x02, ST_MIC_OK = 0x04, ST_TEST = 0x08,
               ST_PREV_RUNNING = 0x10, ST_PREV_EMPTY = 0x20, ST_CUR_VALID = 0x40, ST_PREV_VALID = 0x80;
-const uint8_t DF_TEST = 0x01, DF_BANDS2 = 0x02, DF_HAS_CONFIG = 0x80;
+const uint8_t DF_TEST = 0x01, DF_BANDS2 = 0x02, DF_BANDS3 = 0x04, DF_HAS_CONFIG = 0x80;
 
 // Washer seconds heard over BLE, matched to this dryer's own seconds before upload.
 struct WasherSecond {
@@ -543,7 +543,7 @@ void setup() {
 
   nodeSalt = (uint32_t)(ESP.getEfuseMac() & 0xFFFFFF);
   randomSeed(nodeSalt ^ esp_random());
-  preventiveRebootUs = (uint64_t)(86400000UL + (nodeSalt % 21600000UL)) * 1000ULL;  // 24 h + up to ~4.7 h
+  preventiveRebootUs = (uint64_t)(86400000UL + (nodeSalt % 21600000UL)) * 1000ULL;  // 24 h + up to 6 h
 
   Serial.println("\n\n========================================");
   Serial.println("   Dryer Monitor");
@@ -685,7 +685,7 @@ void applyServerReply(const String& body) {
   n.fullMs = c["washerFullTimerMs"].as<unsigned long>();
   n.maxCycleMs = c["washerMaxCycleMs"].as<unsigned long>();
   if (n.dryerOn <= 0 || n.dryerDoor <= 0 || n.firstFill <= 0 || n.refill <= 0 || n.doorDrop <= 0
-      || n.refillMs == 0 || n.fullMs == 0 || n.maxCycleMs < n.fullMs || (n.refillBands != 1 && n.refillBands != 2)) {
+      || n.refillMs == 0 || n.fullMs == 0 || n.maxCycleMs < n.fullMs || n.refillBands < 1 || n.refillBands > 3) {
     Serial.printf("[CONFIG] Ignored invalid website thresholds v%d\n", n.version);
     return;
   }
@@ -722,6 +722,7 @@ void updateDryerAdvert() {
     portEXIT_CRITICAL(&cfgMux);
     flags |= DF_HAS_CONFIG;
     if (c.refillBands == 2) flags |= DF_BANDS2;
+    if (c.refillBands == 3) flags |= DF_BANDS3;
     putU16(b + 5, c.version);
     putU24(b + 8, toU24(c.firstFill));
     putU24(b + 11, toU24(c.refill));
