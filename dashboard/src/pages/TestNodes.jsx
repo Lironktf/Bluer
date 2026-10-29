@@ -13,7 +13,7 @@ const FIELDS = [
   { key: 'dryerDoorChange', label: 'Dryer door change', step: 0.05 },
   { key: 'washerFirstFill', label: 'Washer first fill', step: 500 },
   { key: 'washerRefill', label: 'Washer refill', step: 500 },
-  { key: 'washerRefillBands', label: 'Refill bands (1 = 7.9–9.8 kHz only, 2 = either)', step: 1 },
+  { key: 'washerRefillBands', label: 'Refill bands (1 = 7.9–9.8 kHz, 2 = either, 3 = 9.8–11.6 kHz)', step: 1 },
   { key: 'washerDoorDrop', label: 'Washer door drop', step: 10000 },
   { key: 'washerRefillTimerMs', label: 'Refill timer (min)', minutes: true, step: 0.5 },
   { key: 'washerFullTimerMs', label: 'First-fill timer (min)', minutes: true, step: 0.5 },
