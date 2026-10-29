@@ -10,7 +10,7 @@
 // Flash the dryer and washer of a pair together: older firmware uses a different BLE format.
 //VARIES: must match the paired dryer's trailing ID number.
 const uint8_t PAIR_NUMBER = 1;
-//VARIES: serial-log label only; keep its number consistent with PAIR_NUMBER.
+//VARIES: serial-log label only; it doesn't affect BLE pairing or website IDs.
 const char* machineId = "WASHER_NODE_W1";
 
 // Read by supervisorTask on core 0, written by loop() on core 1.
@@ -35,7 +35,7 @@ unsigned long TIMER_FULL_MS = 1500000UL;   // 25 min, start of cycle, WallClock,
 unsigned long TIMER_REFILL_MS = 630000UL;  // 10 min 30 s, per-device, see Arduino/MACHINES.md. Very accurate timing, perfect for at least the rightmost washer in tests
 double FIRST_FILL_HIGH2 = 68500;          // either band, starts the cycle
 double REFILL_HIGH = 32000;                // per-device, see Arduino/MACHINES.md. this is a later water in, tops the timer back up
-int REFILL_BANDS = 2;                      // per-device, 2 = refill on either band, 1 = 7875-9750 Hz only
+int REFILL_BANDS = 2;                      // per-device, 1 = lower band, 2 = either band, 3 = upper band only
 double DOOR_DROP = 750000;                 // per-device, lowmid drop that marks the door closed
 //For above, M1 max from machine next is 45000, test if all the water ins are above this day of installation
 unsigned long cycleStartedAt = 0;              // when the current cycle began
@@ -87,7 +87,7 @@ ArduinoFFT<double> FFT = ArduinoFFT<double>(vReal, vImag, SAMPLES, SAMPLE_RATE);
 const uint8_t LINK_LEN = 27;
 const uint8_t ST_RUNNING = 0x01, ST_EMPTY = 0x02, ST_MIC_OK = 0x04, ST_TEST = 0x08,
               ST_PREV_RUNNING = 0x10, ST_PREV_EMPTY = 0x20, ST_CUR_VALID = 0x40, ST_PREV_VALID = 0x80;
-const uint8_t DF_TEST = 0x01, DF_BANDS2 = 0x02, DF_HAS_CONFIG = 0x80;
+const uint8_t DF_TEST = 0x01, DF_BANDS2 = 0x02, DF_BANDS3 = 0x04, DF_HAS_CONFIG = 0x80;
 
 NimBLEAdvertising* pAdvertising;
 NimBLEScan* pScan;
@@ -211,7 +211,7 @@ class DryerScanCallbacks : public NimBLEScanCallbacks {
 
 bool configValid(const SavedConfig& c) {
   return c.version > 0 && c.firstFill > 0 && c.refill > 0 && c.doorDrop > 0 && c.refillMs > 0 && c.fullMs > 0
-         && c.maxCycleMs >= c.fullMs && (c.refillBands == 1 || c.refillBands == 2);
+         && c.maxCycleMs >= c.fullMs && c.refillBands >= 1 && c.refillBands <= 3;
 }
 
 void useConfig(const SavedConfig& c) {
@@ -263,7 +263,8 @@ void applyDryerMessage() {
   }
 
   if ((m.flags & DF_HAS_CONFIG) && m.version != appliedConfigVersion && m.version != rejectedConfigVersion) {
-    SavedConfig c = { m.version, (uint8_t)((m.flags & DF_BANDS2) ? 2 : 1), m.firstFill, m.refill, m.doorDrop,
+    uint8_t refillBands = (m.flags & DF_BANDS3) ? 3 : ((m.flags & DF_BANDS2) ? 2 : 1);
+    SavedConfig c = { m.version, refillBands, m.firstFill, m.refill, m.doorDrop,
                       m.refillMs, m.fullMs, m.maxCycleMs };
     if (configValid(c)) {
       useConfig(c);
@@ -316,7 +317,7 @@ void supervisorTask(void* parameter) {
     esp_task_wdt_reset();
     vTaskDelay(pdMS_TO_TICKS(5000));
 
-    if (millis() - loopHeartbeat > LOOP_STALL_TIMEOUT_MS) {
+    if ((long)(millis() - loopHeartbeat) > (long)LOOP_STALL_TIMEOUT_MS) {
       hardRestart("main loop stalled");
     }
 
@@ -378,7 +379,7 @@ void setup() {
 
   nodeSalt = (uint32_t)(ESP.getEfuseMac() & 0xFFFFFF);
   randomSeed(nodeSalt ^ esp_random());
-  preventiveRebootUs = (uint64_t)(86400000UL + (nodeSalt % 21600000UL)) * 1000ULL;  // 24 h + up to ~4.7 h
+  preventiveRebootUs = (uint64_t)(86400000UL + (nodeSalt % 21600000UL)) * 1000ULL;  // 24 h + up to 6 h
 
   // Staggered boot so several nodes on one supply never draw inrush together.
   delay(nodeSalt % 12000);
@@ -554,7 +555,10 @@ void loop() {
       Serial.println("🛑 Cycle force-ended (42 min hard cap reached)");
     } else {
       //If when its supposed to end minus time now is < the refill timer, even if timer had already passed here, its unsigned, so would be false and wouldnt incorrectly add more time to timer
-      if ((actualAvgWater > REFILL_HIGH || (REFILL_BANDS == 2 && actualAvgWater2 > REFILL_HIGH)) && (cycleEndsAt - millis() < TIMER_REFILL_MS)) {
+      bool refillDetected = (REFILL_BANDS == 1 && actualAvgWater > REFILL_HIGH)
+                || (REFILL_BANDS == 2 && (actualAvgWater > REFILL_HIGH || actualAvgWater2 > REFILL_HIGH))
+                || (REFILL_BANDS == 3 && actualAvgWater2 > REFILL_HIGH);
+      if (refillDetected && (cycleEndsAt - millis() < TIMER_REFILL_MS)) {
         cycleEndsAt = millis() + TIMER_REFILL_MS;  //Update end time
         Serial.println("💧 Refill detected -> timer topped up");
       }
