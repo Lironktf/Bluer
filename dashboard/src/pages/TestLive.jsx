@@ -228,9 +228,11 @@ function Live({ lock }) {
   };
 
   const over = (value, limit) => (typeof value === 'number' && typeof limit === 'number' && value > limit ? styles.over : undefined);
-  // First fill counts on either band; refill only on band 2 when the node is set to 2 bands.
+  // First fill counts on either band; refill bands follow the node's selected mode.
   const waterClass = (value, band) => {
-    const refillCounts = band === 1 || t.washerRefillBands !== 1;
+    const refillCounts = t.washerRefillBands === 2
+      || (t.washerRefillBands === 1 && band === 1)
+      || (t.washerRefillBands === 3 && band === 2);
     return over(value, t.washerFirstFill)
       || (refillCounts && typeof value === 'number' && value > t.washerRefill ? styles.warn : undefined);
   };
