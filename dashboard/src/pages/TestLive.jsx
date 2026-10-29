@@ -10,6 +10,7 @@ const FETCH_MINUTES = 15; // the table covers this; graphs show 1/10 of it
 const CHART_MS = (FETCH_MINUTES * 60000) / 10;
 const DRYER_Y_CAP = 15;
 const WASHER_Y_CAP = 150000;
+const DOOR_Y_CAP = 1000000;
 
 // One sample per second from the node, while test mode is on:
 //   dAvg10        dryer avg10 (what the dryer-on threshold is compared to)
@@ -86,6 +87,14 @@ function summarize(samples) {
 
 /** Simple time chart: lines for readings, dashed lines for thresholds, shading while running.
  *  With yCap, the axis is fixed and anything higher is drawn flat along the top. */
+function niceStep(raw) {
+  const pow = 10 ** Math.floor(Math.log10(raw));
+  const n = raw / pow;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * pow;
+}
+
+const fmtTick = (v) => (v >= 1e6 ? `${fmt(v / 1e6, 2)}M` : v >= 1000 ? `${fmt(v / 1000, 1)}k` : fmt(v, 2));
+
 function Chart({ title, samples: allSamples, series, thresholds: allThresholds, runningKey, start, end, yCap }) {
   const W = 1000;
   const H = 200;
@@ -99,6 +108,8 @@ function Chart({ title, samples: allSamples, series, thresholds: allThresholds, 
 
   const x = (t) => ((t - start) / span) * W;
   const y = (v) => H - (Math.min(v, yMax) / yMax) * (H - TOP);
+  const step = yCap ? yCap / 10 : niceStep(yMax / 5);
+  const ticks = Array.from({ length: Math.floor(yMax / step + 1e-9) + 1 }, (_, i) => i * step);
 
   return (
     <figure className={styles.chart}>
@@ -114,28 +125,38 @@ function Chart({ title, samples: allSamples, series, thresholds: allThresholds, 
           <span><i className={styles.runKey} />running</span>
         </span>
       </figcaption>
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={title}>
-        {runSpans(samples, runningKey).map((r) => {
-          const x0 = x(Math.max(r.start, start));
-          return <rect key={r.start} x={x0} y={0} width={Math.max(x(Math.min(r.end, end)) - x0, 1)} height={H} className={styles.runShade} />;
-        })}
-        {thresholds.map((t) => (
-          <line key={t.label} x1={0} x2={W} y1={y(t.value)} y2={y(t.value)} stroke={t.color} strokeDasharray="8 6" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-        ))}
-        {series.map((d) => (
-          <polyline
-            key={d.key}
-            fill="none"
-            stroke={d.color}
-            strokeWidth={1.5}
-            vectorEffect="non-scaling-stroke"
-            points={samples
-              .filter((s) => typeof s[d.key] === 'number')
-              .map((s) => `${x(new Date(s.ts).getTime())},${y(s[d.key])}`)
-              .join(' ')}
-          />
-        ))}
-      </svg>
+      <div className={styles.plot}>
+        <div className={styles.yAxis} aria-hidden="true">
+          {ticks.map((v) => (
+            <span key={v} style={{ top: `${(y(v) / H) * 100}%` }}>{fmtTick(v)}</span>
+          ))}
+        </div>
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={title}>
+          {ticks.map((v) => (
+            <line key={v} x1={0} x2={W} y1={y(v)} y2={y(v)} className={styles.gridLine} vectorEffect="non-scaling-stroke" />
+          ))}
+          {runSpans(samples, runningKey).map((r) => {
+            const x0 = x(Math.max(r.start, start));
+            return <rect key={r.start} x={x0} y={0} width={Math.max(x(Math.min(r.end, end)) - x0, 1)} height={H} className={styles.runShade} />;
+          })}
+          {thresholds.map((t) => (
+            <line key={t.label} x1={0} x2={W} y1={y(t.value)} y2={y(t.value)} stroke={t.color} strokeDasharray="8 6" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+          ))}
+          {series.map((d) => (
+            <polyline
+              key={d.key}
+              fill="none"
+              stroke={d.color}
+              strokeWidth={1.5}
+              vectorEffect="non-scaling-stroke"
+              points={samples
+                .filter((s) => typeof s[d.key] === 'number')
+                .map((s) => `${x(new Date(s.ts).getTime())},${y(s[d.key])}`)
+                .join(' ')}
+            />
+          ))}
+        </svg>
+      </div>
       <div className={styles.axis}>
         <span>{new Date(start).toLocaleTimeString()}</span>
         <span>{yCap ? `top ${fmt(yCap, 0)} (higher values drawn flat at the top)` : `max shown ${fmt(yMax, 0)}`}</span>
@@ -303,6 +324,7 @@ function Live({ lock }) {
             start={start}
             end={end}
             runningKey="wRunning"
+            yCap={DOOR_Y_CAP}
             series={[
               { key: 'wDoorDropMax', label: '60–600 Hz drop (max per second)', color: '#7c3aed' },
             ]}
