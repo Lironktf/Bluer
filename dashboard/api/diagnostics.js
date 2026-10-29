@@ -2,7 +2,7 @@
 //  - GET  (no kind)          raw heartbeat samples for /test/history (unchanged)
 //  - GET  ?kind=auth         validate the node settings password                [password]
 //  - GET  ?kind=nodes        every node's thresholds, history and test mode
-//  - PUT  ?kind=config       save a node's thresholds                            [password]
+//  - PUT  ?kind=config       save a node's thresholds
 //  - PUT  ?kind=testmode     switch a node's live-readings test mode on or off
 //  - POST ?kind=telemetry    a node uploads per-second readings while in test mode
 //  - GET  ?kind=telemetry    readings for /test/live
@@ -407,7 +407,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && !kind) return await readHeartbeats(req, res);
     if (req.method === 'POST' && kind === 'telemetry') return await receiveTelemetry(req, res);
 
-    if (kind === 'auth' || kind === 'config') {
+    if (kind === 'auth') {
       if (!(await checkAdmin(req, res))) return;
     }
     if (req.method === 'GET' && kind === 'auth') return res.status(200).json({ success: true });
