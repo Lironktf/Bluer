@@ -18,7 +18,7 @@ const THRESHOLD_LIMITS = {
   dryerDoorChange: [0.05, 10],
   washerFirstFill: [1000, 10000000],
   washerRefill: [1000, 10000000],
-  washerRefillBands: [1, 2],  // 2 = refill on either band, 1 = 7875-9750 Hz band only
+  washerRefillBands: [1, 3],  // 1 = lower band, 2 = either band, 3 = upper band only
   washerRefillTimerMs: [60000, 3600000],
   washerDoorDrop: [10000, 100000000],
   washerFullTimerMs: [60000, 7200000],
