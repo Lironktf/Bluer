@@ -10,7 +10,8 @@ BLE name for pair n is `WASHER_W<n>`, set in both the washer sketch and the pair
 ## Quick reference: thresholds to flash
 
 Baseline is the generic sketch: dryer `2.45` / `0.65`; washer `TIMER_REFILL_MS 600000`, `FIRST_FILL_HIGH2 68500`,
-`REFILL_HIGH 32000` (either band), door drop `750000`. **Bold** = differs from baseline.
+`REFILL_HIGH 32000` (either band), door drop `750000`. Refill band mode `1` means lower (7875–9750 Hz)
+only, `2` means either band, and `3` means upper (9750–11625 Hz) only. **Bold** = differs from baseline.
 
 | Machine | Old id / old BLE name | Thresholds | Source |
 |---|---|---|---|
