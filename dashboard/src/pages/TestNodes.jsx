@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import PasswordGate from '../components/PasswordGate/PasswordGate';
 import { adminFetch, formatAgo, formatRemaining, nodeLabel } from '../utils/adminApi';
 import styles from './TestAdmin.module.css';
 
 const POLL_INTERVAL_MS = 15000;
+const publicPageLock = () => {};
 const TEST_MODE_LENGTHS = [15, 30, 60, 120, 240];
 
 // Timers are stored in ms on the node; shown here in minutes.
@@ -217,7 +217,7 @@ export default function TestNodes() {
       <p className={styles.sub}>
         <Link to="/test">Sensor diagnostics</Link> · <Link to="/test/live">Live readings</Link>
       </p>
-      <PasswordGate>{({ lock }) => <NodeList lock={lock} />}</PasswordGate>
+      <NodeList lock={publicPageLock} />
     </div>
   );
 }
