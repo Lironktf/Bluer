@@ -827,7 +827,7 @@ int httpPostJson(const char* url, const char* payload, String* reply) {
 
   HTTPClient http;
   http.setConnectTimeout(8000);
-  http.setTimeout(8000);
+  http.setTimeout(20000);  // a slow cold-start reply (-11) is not a lost upload
   if (!http.begin(client, url)) {
     Serial.println("❌ Could not start the HTTPS session");
     return -1;
@@ -903,10 +903,12 @@ void serviceTelemetry() {
   snprintf(telemetryJson + len, sizeof(telemetryJson) - len, "]}");
 
   String reply;
+  unsigned long postStart = millis();
   int code = httpPostJson(telemetryUrl, telemetryJson, &reply);
   netHeartbeat = millis();
   if (code < 200 || code >= 300) {
-    Serial.printf("❌ Telemetry upload failed: %d\n", code);
+    Serial.printf("❌ Telemetry upload failed: %d (%s) after %lu ms, rssi=%d dBm\n", code,
+                  HTTPClient::errorToString(code).c_str(), millis() - postStart, WiFi.RSSI());
     return;
   }
   portENTER_CRITICAL(&telemetryMux);
