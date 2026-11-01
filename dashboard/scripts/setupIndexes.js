@@ -140,10 +140,6 @@ async function setupIndexes() {
     await flags.createIndex({ machineId: 1, until: -1 }, { name: 'machineId_until' });
     console.log('   ✓ Created compound index on machineId + until');
 
-    await reports.createIndex({ createdAt: 1 }, { expireAfterSeconds: THIRTY_DAYS_S, name: 'ttl_30days' });
-    await flags.createIndex({ until: 1 }, { expireAfterSeconds: THIRTY_DAYS_S, name: 'ttl_30days_after_until' });
-    console.log('   ✓ Created TTL indexes on reports and flags (30 days)');
-
     // ===== VERIFY INDEXES =====
     console.log('\n🔍 Verifying indexes...');
 
