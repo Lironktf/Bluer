@@ -143,7 +143,7 @@ unsigned long TIMER_FULL_MS = 1500000UL;    // 25 min, start of cycle
 unsigned long TIMER_REFILL_MS = 600000UL;   // VARIES, per-device, see Arduino/MACHINES.md
 double FIRST_FILL_HIGH2 = 68500;            // either band, starts the cycle
 double REFILL_HIGH = 32000;                 // VARIES, a later water in tops the timer back up
-int REFILL_BANDS = 2;                       // VARIES, 2 = refill on either band, 1 = 7875-9750 Hz only
+  int REFILL_BANDS = 2;                       // VARIES, 1 = lower band, 2 = either band, 3 = upper band only
 double DOOR_DROP = 750000;                  // VARIES, lowmid drop that marks the door closed
 unsigned long cycleStartedAt = 0;
 unsigned long MAX_CYCLE_MS = 2520000UL;  // 42 min hard cap
@@ -727,7 +727,10 @@ void washerStep() {
       WasherSerial.println("🛑 Cycle force-ended (42 min hard cap reached)");
     } else {
       // Unsigned on purpose: once the timer has passed, this is false and adds no time.
-      if ((actualAvgWater > REFILL_HIGH || (REFILL_BANDS == 2 && actualAvgWater2 > REFILL_HIGH)) && (cycleEndsAt - millis() < TIMER_REFILL_MS)) {
+      bool refillDetected = (REFILL_BANDS == 1 && actualAvgWater > REFILL_HIGH)
+                || (REFILL_BANDS == 2 && (actualAvgWater > REFILL_HIGH || actualAvgWater2 > REFILL_HIGH))
+                || (REFILL_BANDS == 3 && actualAvgWater2 > REFILL_HIGH);
+      if (refillDetected && (cycleEndsAt - millis() < TIMER_REFILL_MS)) {
         cycleEndsAt = millis() + TIMER_REFILL_MS;
         WasherSerial.println("💧 Refill detected -> timer topped up");
       }
@@ -813,7 +816,7 @@ void applyServerReply(const String& body) {
   n.fullMs = c["washerFullTimerMs"].as<unsigned long>();
   n.maxCycleMs = c["washerMaxCycleMs"].as<unsigned long>();
   if (n.dryerOn <= 0 || n.dryerDoor <= 0 || n.firstFill <= 0 || n.refill <= 0 || n.doorDrop <= 0
-      || n.refillMs == 0 || n.fullMs == 0 || n.maxCycleMs < n.fullMs || (n.refillBands != 1 && n.refillBands != 2)) {
+      || n.refillMs == 0 || n.fullMs == 0 || n.maxCycleMs < n.fullMs || n.refillBands < 1 || n.refillBands > 3) {
     DryerSerial.printf("[CONFIG] Ignored invalid website thresholds v%d\n", n.version);
     return;
   }

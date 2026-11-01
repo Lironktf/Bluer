@@ -91,15 +91,17 @@ async function setupIndexes() {
     );
     console.log('   ✓ Created compound index on changeType + timestamp');
 
-    // Optional: TTL index to auto-delete old history (uncomment if desired)
-    // This will automatically delete records older than 90 days
-    /*
-    await history.createIndex(
+    // TTL indexes: MongoDB deletes each record this long after its date field.
+    const THIRTY_DAYS_S = 30 * 24 * 60 * 60;
+    await history.createIndex({ timestamp: 1 }, { expireAfterSeconds: THIRTY_DAYS_S, name: 'ttl_30days' });
+    console.log('   ✓ Created TTL index (30 days retention)');
+
+    console.log('\n🩺 Setting up TTL for "machineDiagnostics" collection...');
+    await db.collection('machineDiagnostics').createIndex(
       { timestamp: 1 },
-      { expireAfterSeconds: 7776000, name: 'ttl_90days' }
+      { expireAfterSeconds: THIRTY_DAYS_S, name: 'ttl_30days' }
     );
-    console.log('   ✓ Created TTL index (90 days retention)');
-    */
+    console.log('   ✓ Created TTL index (30 days retention)');
 
     // ===== MACHINE REPORTS COLLECTION =====
     console.log('\n🚩 Setting up indexes for "machineReports" collection...');
@@ -137,6 +139,10 @@ async function setupIndexes() {
 
     await flags.createIndex({ machineId: 1, until: -1 }, { name: 'machineId_until' });
     console.log('   ✓ Created compound index on machineId + until');
+
+    await reports.createIndex({ createdAt: 1 }, { expireAfterSeconds: THIRTY_DAYS_S, name: 'ttl_30days' });
+    await flags.createIndex({ until: 1 }, { expireAfterSeconds: THIRTY_DAYS_S, name: 'ttl_30days_after_until' });
+    console.log('   ✓ Created TTL indexes on reports and flags (30 days)');
 
     // ===== VERIFY INDEXES =====
     console.log('\n🔍 Verifying indexes...');

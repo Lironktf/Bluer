@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { track } from '@vercel/analytics';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { usePolling } from '../hooks/usePolling';
 import MachineGrid from '../components/MachineGrid/MachineGrid';
 import SummaryBar from '../components/SummaryBar/SummaryBar';
 import RoomSearchAutocomplete from '../components/RoomSearchAutocomplete/RoomSearchAutocomplete';
@@ -17,7 +18,8 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://laun-dryer.vercel.
 // Used the first time someone visits, before they have picked a room.
 const DEFAULT_ROOM_NAME = 'SJU-Sieg/Ryan';
 
-const POLL_INTERVAL_MS = 5000;
+// Nodes report every 30 s, sooner on a change; polling faster only costs function calls.
+const POLL_INTERVAL_MS = 15000;
 
 /**
  * Fetch JSON, returning null instead of throwing on anything unexpected.
@@ -94,11 +96,7 @@ export default function Dashboard() {
     }
   }, []);
 
-  useEffect(() => {
-    refresh();
-    const interval = setInterval(refresh, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [refresh]);
+  usePolling(refresh, POLL_INTERVAL_MS);
 
   // Room list is public -- search works with or without an account.
   useEffect(() => {

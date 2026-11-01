@@ -10,7 +10,7 @@
 // Flash the dryer and washer of a pair together: older firmware uses a different BLE format.
 //VARIES: must match the paired dryer's trailing ID number.
 const uint8_t PAIR_NUMBER = 1;
-//VARIES: serial-log label only; keep its number consistent with PAIR_NUMBER.
+//VARIES: serial-log label only; it doesn't affect BLE pairing or website IDs.
 const char* machineId = "WASHER_NODE_W1";
 
 // Read by supervisorTask on core 0, written by loop() on core 1.
@@ -35,13 +35,11 @@ unsigned long TIMER_FULL_MS = 1500000UL;   // 25 min, start of cycle, WallClock,
 unsigned long TIMER_REFILL_MS = 630000UL;  // 10 min 30 s, per-device, see Arduino/MACHINES.md. Very accurate timing, perfect for at least the rightmost washer in tests
 double FIRST_FILL_HIGH2 = 68500;          // either band, starts the cycle
 double REFILL_HIGH = 32000;                // per-device, see Arduino/MACHINES.md. this is a later water in, tops the timer back up
-int REFILL_BANDS = 2;                      // per-device, 2 = refill on either band, 1 = 7875-9750 Hz only
+int REFILL_BANDS = 2;                      // per-device, 1 = lower band, 2 = either band, 3 = upper band only
 double DOOR_DROP = 750000;                 // per-device, lowmid drop that marks the door closed
 //For above, M1 max from machine next is 45000, test if all the water ins are above this day of installation
 unsigned long cycleStartedAt = 0;              // when the current cycle began
 unsigned long MAX_CYCLE_MS = 2520000UL;  // 42 min hard cap
-unsigned long lastSendTime = 0;
-const unsigned long sendInterval = 300000;  // 5 min
 
 // ---------------- Restart, Reliability supervision ----------------
 volatile unsigned long loopHeartbeat = 0;
@@ -78,22 +76,21 @@ ArduinoFFT<double> FFT = ArduinoFFT<double>(vReal, vImag, SAMPLES, SAMPLE_RATE);
 
 // ---------------- BLE link with the paired dryer ----------------
 // Both sides broadcast 27 bytes of manufacturer data: FF FF 'B' <type> <pair> ...
-// A legacy BLE advertisement holds at most 31 bytes, so the washer sends a rolling
-// two-second window every second instead of one 15-second batch.
-// Washer 'W': [5] status bits, [6-7] applied config version, [8] second counter,
-//             [9-17] newest second, [18-26] the second before (water1, water2, door drop, 24-bit each).
+// A legacy BLE advertisement holds at most 31 bytes, so the washer sends its last two
+// 5 s rounds every round, and the dryer can miss several seconds without losing one.
+// Washer 'W': [5] status bits, [6-7] applied config version, [8] round counter,
+//             [9-17] newest round, [18-26] the round before (water1, water2, door drop, 24-bit each).
 // Dryer  'D': [5-6] config version, [7] flags, [8-10] first fill, [11-13] refill,
 //             [14-17] door drop, [18-20] refill ms, [21-23] full ms, [24-26] max cycle ms.
 const uint8_t LINK_LEN = 27;
-const uint8_t ST_RUNNING = 0x01, ST_EMPTY = 0x02, ST_MIC_OK = 0x04, ST_TEST = 0x08,
+const uint8_t ST_RUNNING = 0x01, ST_EMPTY = 0x02, ST_MIC_OK = 0x04,  // 0x08 was test mode
               ST_PREV_RUNNING = 0x10, ST_PREV_EMPTY = 0x20, ST_CUR_VALID = 0x40, ST_PREV_VALID = 0x80;
-const uint8_t DF_TEST = 0x01, DF_BANDS2 = 0x02, DF_HAS_CONFIG = 0x80;
+const uint8_t DF_BANDS2 = 0x02, DF_BANDS3 = 0x04, DF_HAS_CONFIG = 0x80;  // 0x01 was test mode
 
 NimBLEAdvertising* pAdvertising;
 NimBLEScan* pScan;
 const unsigned long DRYER_LISTEN_EVERY_MS = 20000;
 const uint32_t DRYER_LISTEN_MS = 1500;
-const unsigned long DRYER_SILENT_TEST_OFF_MS = 300000UL;  // dryer unheard this long -> stop test mode
 unsigned long lastListenStart = 0;
 
 struct DryerMessage {
@@ -104,7 +101,6 @@ struct DryerMessage {
 portMUX_TYPE dryerMsgMux = portMUX_INITIALIZER_UNLOCKED;
 DryerMessage pendingDryerMsg;
 volatile uint32_t dryerMsgSeq = 0;  // bumped by the BLE callback, applied by loop()
-unsigned long lastDryerHeardMs = 0;
 
 struct SavedConfig {
   uint16_t version;
@@ -115,16 +111,16 @@ Preferences prefs;
 uint16_t appliedConfigVersion = 0;  // 0 = built-in values
 uint16_t rejectedConfigVersion = 0;
 
-// Test mode: the same per-second peaks the combined node uploads.
-bool testMode = false;
-double secWater1Max = 0, secWater2Max = 0, secDoorDropMax = 0;
-int secReads = 0;
-struct SecondSample {
+// The highest readings of each 5 s round and the state at its end; the dryer reports them.
+const unsigned long ROUND_MS = 5000;
+double roundWater1Max = 0, roundWater2Max = 0, roundDoorDropMax = 0;
+int roundReads = 0;
+struct Round {
   uint32_t w1, w2, drop;
   bool running, empty, valid;
 };
-SecondSample curSecond = {}, prevSecond = {};
-uint8_t secondCounter = 0;
+Round curRound = {}, prevRound = {};
+uint8_t roundCounter = 0;
 
 void hardRestart(const char* why) {
   Serial.printf("[SUPERVISOR] Restart: %s\n", why);
@@ -157,29 +153,26 @@ static uint32_t toU24(double v) {
   return v >= 16777215.0 ? 16777215UL : (uint32_t)(v + 0.5);
 }
 
-// The washer's status, plus two seconds of test-mode readings while test mode is on.
+// The washer's status, plus its last two 5 s rounds of readings.
 void updateAdvert() {
   uint8_t b[LINK_LEN] = { 0xFF, 0xFF, 'B', 'W', PAIR_NUMBER };
   uint8_t st = 0;
   if (running) st |= ST_RUNNING;
   if (empty) st |= ST_EMPTY;
   if (micHealthy) st |= ST_MIC_OK;
-  if (testMode) {
-    st |= ST_TEST;
-    if (prevSecond.running) st |= ST_PREV_RUNNING;
-    if (prevSecond.empty) st |= ST_PREV_EMPTY;
-    if (curSecond.valid) st |= ST_CUR_VALID;
-    if (prevSecond.valid) st |= ST_PREV_VALID;
-    b[8] = secondCounter;
-    putU24(b + 9, curSecond.w1);
-    putU24(b + 12, curSecond.w2);
-    putU24(b + 15, curSecond.drop);
-    putU24(b + 18, prevSecond.w1);
-    putU24(b + 21, prevSecond.w2);
-    putU24(b + 24, prevSecond.drop);
-  }
+  if (prevRound.running) st |= ST_PREV_RUNNING;
+  if (prevRound.empty) st |= ST_PREV_EMPTY;
+  if (curRound.valid) st |= ST_CUR_VALID;
+  if (prevRound.valid) st |= ST_PREV_VALID;
   b[5] = st;
   putU16(b + 6, appliedConfigVersion);
+  b[8] = roundCounter;
+  putU24(b + 9, curRound.w1);
+  putU24(b + 12, curRound.w2);
+  putU24(b + 15, curRound.drop);
+  putU24(b + 18, prevRound.w1);
+  putU24(b + 21, prevRound.w2);
+  putU24(b + 24, prevRound.drop);
 
   NimBLEAdvertisementData data;
   data.setManufacturerData(b, LINK_LEN);
@@ -211,7 +204,7 @@ class DryerScanCallbacks : public NimBLEScanCallbacks {
 
 bool configValid(const SavedConfig& c) {
   return c.version > 0 && c.firstFill > 0 && c.refill > 0 && c.doorDrop > 0 && c.refillMs > 0 && c.fullMs > 0
-         && c.maxCycleMs >= c.fullMs && (c.refillBands == 1 || c.refillBands == 2);
+         && c.maxCycleMs >= c.fullMs && c.refillBands >= 1 && c.refillBands <= 3;
 }
 
 void useConfig(const SavedConfig& c) {
@@ -235,49 +228,31 @@ void loadSavedConfig() {
   Serial.printf("[CONFIG] Using saved website thresholds v%u\n", c.version);
 }
 
-// loop(): follows test mode and thresholds relayed by the dryer.
+// loop(): follows thresholds relayed by the dryer.
 void applyDryerMessage() {
   static uint32_t seen = 0;
-  if (seen == dryerMsgSeq) {
-    if (testMode && millis() - lastDryerHeardMs > DRYER_SILENT_TEST_OFF_MS) {
-      testMode = false;
-      Serial.println("[TEST] Dryer not heard for 5 min, test mode off");
-      updateAdvert();
-    }
-    return;
-  }
+  if (seen == dryerMsgSeq) return;
   DryerMessage m;
   portENTER_CRITICAL(&dryerMsgMux);
   m = pendingDryerMsg;
   seen = dryerMsgSeq;
   portEXIT_CRITICAL(&dryerMsgMux);
-  lastDryerHeardMs = millis();
-
-  bool changed = false;
-  bool wantTest = m.flags & DF_TEST;
-  if (wantTest != testMode) {
-    testMode = wantTest;
-    curSecond = prevSecond = SecondSample{};
-    Serial.printf("[TEST] Test mode %s\n", testMode ? "ON" : "off");
-    changed = true;
-  }
 
   if ((m.flags & DF_HAS_CONFIG) && m.version != appliedConfigVersion && m.version != rejectedConfigVersion) {
-    SavedConfig c = { m.version, (uint8_t)((m.flags & DF_BANDS2) ? 2 : 1), m.firstFill, m.refill, m.doorDrop,
+    uint8_t refillBands = (m.flags & DF_BANDS3) ? 3 : ((m.flags & DF_BANDS2) ? 2 : 1);
+    SavedConfig c = { m.version, refillBands, m.firstFill, m.refill, m.doorDrop,
                       m.refillMs, m.fullMs, m.maxCycleMs };
     if (configValid(c)) {
       useConfig(c);
       prefs.putUChar("pair", PAIR_NUMBER);
       prefs.putBytes("cfg", &c, sizeof(c));
       Serial.printf("[CONFIG] Now following website thresholds v%u\n", c.version);
-      changed = true;
+      updateAdvert();
     } else {
       rejectedConfigVersion = m.version;
       Serial.printf("[CONFIG] Ignored invalid thresholds v%u from the dryer\n", m.version);
     }
   }
-
-  if (changed) updateAdvert();
 }
 
 // Listens for the dryer briefly every 20 s. start() returns at once; results arrive in DryerScanCallbacks.
@@ -287,25 +262,24 @@ void listenForDryer() {
   pScan->start(DRYER_LISTEN_MS, false, true);
 }
 
-// Closes the current one-second window of peaks and broadcasts it while test mode is on.
-void closeWasherSecond() {
-  static unsigned long lastSecond = 0;
-  if (millis() - lastSecond < 1000) return;
-  lastSecond = millis();
+// Every 5 s: closes the round of peaks and broadcasts it, alongside the round before.
+void closeWasherRound() {
+  static unsigned long lastRound = 0;
+  if (millis() - lastRound < ROUND_MS) return;
+  lastRound = millis();
 
-  if (testMode) {
-    prevSecond = curSecond;
-    curSecond.valid = secReads > 0;
-    curSecond.w1 = toU24(secWater1Max);
-    curSecond.w2 = toU24(secWater2Max);
-    curSecond.drop = toU24(secDoorDropMax);
-    curSecond.running = running;
-    curSecond.empty = empty;
-    secondCounter++;
-    updateAdvert();
-  }
-  secWater1Max = secWater2Max = secDoorDropMax = 0;
-  secReads = 0;
+  prevRound = curRound;
+  curRound.valid = roundReads > 0;
+  curRound.w1 = toU24(roundWater1Max);
+  curRound.w2 = toU24(roundWater2Max);
+  curRound.drop = toU24(roundDoorDropMax);
+  curRound.running = running;
+  curRound.empty = empty;
+  roundCounter++;
+  updateAdvert();
+
+  roundWater1Max = roundWater2Max = roundDoorDropMax = 0;
+  roundReads = 0;
 }
 
 // Runs on core 0 so it keeps ticking even when loop() is blocked inside a driver call.
@@ -316,7 +290,7 @@ void supervisorTask(void* parameter) {
     esp_task_wdt_reset();
     vTaskDelay(pdMS_TO_TICKS(5000));
 
-    if (millis() - loopHeartbeat > LOOP_STALL_TIMEOUT_MS) {
+    if ((long)(millis() - loopHeartbeat) > (long)LOOP_STALL_TIMEOUT_MS) {
       hardRestart("main loop stalled");
     }
 
@@ -378,7 +352,7 @@ void setup() {
 
   nodeSalt = (uint32_t)(ESP.getEfuseMac() & 0xFFFFFF);
   randomSeed(nodeSalt ^ esp_random());
-  preventiveRebootUs = (uint64_t)(86400000UL + (nodeSalt % 21600000UL)) * 1000ULL;  // 24 h + up to ~4.7 h
+  preventiveRebootUs = (uint64_t)(86400000UL + (nodeSalt % 21600000UL)) * 1000ULL;  // 24 h + up to 6 h
 
   // Staggered boot so several nodes on one supply never draw inrush together.
   delay(nodeSalt % 12000);
@@ -432,7 +406,7 @@ void loop() {
   loopHeartbeat = millis();
   applyDryerMessage();
   listenForDryer();
-  closeWasherSecond();
+  closeWasherRound();
 
   wasRunning = running;
   wasEmpty = empty;
@@ -533,10 +507,10 @@ void loop() {
   double actualAvgWater = AvgHighFreq / WINDOW;
   double actualAvgWater2 = AvgHighFreq2 / WINDOW;
 
-  if (actualAvgWater > secWater1Max) secWater1Max = actualAvgWater;
-  if (actualAvgWater2 > secWater2Max) secWater2Max = actualAvgWater2;
-  if (prevlowmid - lowmid > secDoorDropMax) secDoorDropMax = prevlowmid - lowmid;
-  secReads++;
+  if (actualAvgWater > roundWater1Max) roundWater1Max = actualAvgWater;
+  if (actualAvgWater2 > roundWater2Max) roundWater2Max = actualAvgWater2;
+  if (prevlowmid - lowmid > roundDoorDropMax) roundDoorDropMax = prevlowmid - lowmid;
+  roundReads++;
 
   if (!running && (actualAvgWater2 > FIRST_FILL_HIGH2 || actualAvgWater > FIRST_FILL_HIGH2)) {
     running = true;
@@ -554,7 +528,10 @@ void loop() {
       Serial.println("🛑 Cycle force-ended (42 min hard cap reached)");
     } else {
       //If when its supposed to end minus time now is < the refill timer, even if timer had already passed here, its unsigned, so would be false and wouldnt incorrectly add more time to timer
-      if ((actualAvgWater > REFILL_HIGH || (REFILL_BANDS == 2 && actualAvgWater2 > REFILL_HIGH)) && (cycleEndsAt - millis() < TIMER_REFILL_MS)) {
+      bool refillDetected = (REFILL_BANDS == 1 && actualAvgWater > REFILL_HIGH)
+                || (REFILL_BANDS == 2 && (actualAvgWater > REFILL_HIGH || actualAvgWater2 > REFILL_HIGH))
+                || (REFILL_BANDS == 3 && actualAvgWater2 > REFILL_HIGH);
+      if (refillDetected && (cycleEndsAt - millis() < TIMER_REFILL_MS)) {
         cycleEndsAt = millis() + TIMER_REFILL_MS;  //Update end time
         Serial.println("💧 Refill detected -> timer topped up");
       }
@@ -575,19 +552,11 @@ void loop() {
   Serial.print("Avg_9750_11625:");
   Serial.println(actualAvgWater2);
 
-  // Send status update to server every 5 min
-  unsigned long currentTime = millis();
-
+  // Status bits go out at once; the readings follow with the next round.
   if (empty != wasEmpty || running != wasRunning) {
     updateAdvert();
     Serial.printf("[BLE Broadcast] Updated -> Running: %d, Empty: %d, mic=%s, heap=%u\n",
                   running, empty, micHealthy ? "ok" : "FLAT", (unsigned)ESP.getFreeHeap());
-    lastSendTime = currentTime;
-  }
-
-  if (currentTime - lastSendTime >= sendInterval) {
-    updateAdvert();
-    lastSendTime = currentTime;
   }
 
   delay(25);

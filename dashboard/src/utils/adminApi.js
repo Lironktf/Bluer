@@ -47,13 +47,6 @@ export function formatAgo(iso) {
   return `${Math.round(h / 24)}d ago`;
 }
 
-export function formatRemaining(iso) {
-  if (!iso) return '';
-  const s = Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 1000));
-  const m = Math.floor(s / 60);
-  return `${m}:${String(s % 60).padStart(2, '0')} left`;
-}
-
 /** "sj-3" -> "Pair 3 (Dryer 3 + Washer 3)", "TEST-1" -> "TEST Node 1". */
 export function nodeLabel(nodeId) {
   const [prefix, num] = nodeId.split('-');

@@ -46,26 +46,14 @@ volatile bool empty = true;
 volatile bool running = false;
 bool wasRunning = false;  // edge detection for the serial log only
 
-// State the server has actually acknowledged.
-bool lastReportedRunning = false;
-bool lastReportedEmpty = true;
-bool reportedOnce = false;
-
 // Global status tracking for the washer captured over Bluetooth
 volatile bool washerRunning = false;
 volatile bool washerEmpty = true;
-volatile bool washerHeard = false;  // never relay defaults before the first packet
+volatile bool washerHeard = false;  // never report defaults before the first packet
 volatile bool washerMicOk = true;
 uint16_t washerAckVersion = 0;      // config version the washer says it is following
 unsigned long washerLastHeardMs = 0;
-bool lastRelayedWasherRunning = false;
-bool lastRelayedWasherEmpty = true;
-bool lastRelayedWasherMicOk = true;
-bool washerRelayedOnce = false;
 portMUX_TYPE washerMux = portMUX_INITIALIZER_UNLOCKED;
-unsigned long lastBleScanTime = 0;
-const unsigned long bleScanInterval = 20000;  // 2 s scan out of every 20 s, outside test mode
-bool continuousScan = false;                  // test mode: listen ~30% of the time to catch every washer second
 
 NimBLEScan* pBLEScan;
 NimBLEAdvertising* pAdvertising;
@@ -78,7 +66,7 @@ const unsigned long WIFI_BACKOFF_MAX = 300000UL;
 const unsigned long WIFI_HARD_RESET_MS = 180000UL;  // offline this long -> full radio re-init
 bool wifiIsDown = false;
 unsigned long wifiDownSince = 0;
-volatile bool wifiReinitRequested = false;  // set from the HTTP path, serviced in loop()
+volatile bool wifiReinitRequested = false;  // set after repeated failed reports, serviced by the network task
 
 // ---------------- Reliability supervision ----------------
 // Everything below exists so the node can never end up in a state that only a physical power cycle can clear.
@@ -113,18 +101,6 @@ int16_t lastRawX = 0, lastRawY = 0, lastRawZ = 0;
 int identicalReadCount = 0;
 const int MAX_IDENTICAL_READS = 100;  // 5 s at the 50 ms sample rate
 
-// Per-target upload pacing: backoff applies only after a failure, so a genuine
-// state change is never delayed, and neither machine can starve the other.
-struct UploadSlot {
-  unsigned long nextAttempt = 0;
-  unsigned long backoff = 0;
-};
-UploadSlot dryerSlot;
-UploadSlot washerSlot;
-const unsigned long UPLOAD_BACKOFF_MAX = 120000UL;
-
-bool sendCustomStatusUpdate(const char* targetMachineId, bool isRunning, bool isEmpty,
-                            const char* stateStr, bool isRelay);
 bool record_mpu_accel();
 bool resetMpu();
 bool setup_mpu();
@@ -167,10 +143,6 @@ const char* serverUrl = "https://laun-dryer.vercel.app/api/machines";
 //VARIES: paired washer ID; use the same number as machineId.
 const char* washerMachineId = "sj-w4";
 
-// Timing for sending updates (send every 5 seconds)
-unsigned long lastSendTime = 0;
-const unsigned long sendInterval = 300000;  // 5 min
-
 // Snapshot of the dryer state for the network task (loop() writes, core 0 reads).
 portMUX_TYPE dryerMux = portMUX_INITIALIZER_UNLOCKED;
 bool pubRunning = false;
@@ -179,29 +151,18 @@ const char* pubSensorState = "ok";
 
 // ---------------- BLE link with the paired washer ----------------
 // Both sides broadcast 27 bytes of manufacturer data: FF FF 'B' <type> <pair> ...
-// A legacy BLE advertisement holds at most 31 bytes, so the washer sends a rolling
-// two-second window every second instead of one 15-second batch.
-// Washer 'W': [5] status bits, [6-7] applied config version, [8] second counter,
-//             [9-17] newest second, [18-26] the second before (water1, water2, door drop, 24-bit each).
+// A legacy BLE advertisement holds at most 31 bytes, so the washer sends its last two
+// 5 s rounds every round, and the dryer can miss several seconds without losing one.
+// Washer 'W': [5] status bits, [6-7] applied config version, [8] round counter,
+//             [9-17] newest round, [18-26] the round before (water1, water2, door drop, 24-bit each).
 // Dryer  'D': [5-6] config version, [7] flags, [8-10] first fill, [11-13] refill,
 //             [14-17] door drop, [18-20] refill ms, [21-23] full ms, [24-26] max cycle ms.
 const uint8_t LINK_LEN = 27;
-const uint8_t ST_RUNNING = 0x01, ST_EMPTY = 0x02, ST_MIC_OK = 0x04, ST_TEST = 0x08,
+const uint8_t ST_RUNNING = 0x01, ST_EMPTY = 0x02, ST_MIC_OK = 0x04,  // 0x08 was test mode
               ST_PREV_RUNNING = 0x10, ST_PREV_EMPTY = 0x20, ST_CUR_VALID = 0x40, ST_PREV_VALID = 0x80;
-const uint8_t DF_TEST = 0x01, DF_BANDS2 = 0x02, DF_HAS_CONFIG = 0x80;
+const uint8_t DF_BANDS2 = 0x02, DF_BANDS3 = 0x04, DF_HAS_CONFIG = 0x80;  // 0x01 was test mode
 
-// Washer seconds heard over BLE, matched to this dryer's own seconds before upload.
-struct WasherSecond {
-  bool valid;
-  uint8_t counter;
-  unsigned long t;  // this dryer's millis() when that washer second ended (first time heard)
-  uint32_t w1, w2, drop;
-  bool running, empty;
-};
-const int WASHER_RING = 32;
-WasherSecond washerRing[WASHER_RING];
-
-// ---------------- Website thresholds and test mode ----------------
+// ---------------- Website thresholds ----------------
 struct NodeConfig {
   int version;
   float dryerOn, dryerDoor;
@@ -214,25 +175,81 @@ NodeConfig nodeCfg;            // dryer values are used here; washer values are 
 volatile uint32_t cfgSeq = 0;  // bumped when nodeCfg changes; loop() copies the dryer values on change
 int appliedConfigVersion = 0;  // 0 = built-in values
 Preferences prefs;
-const char* telemetryUrl = "https://laun-dryer.vercel.app/api/diagnostics?kind=telemetry";
 
-volatile bool testMode = false;
-const unsigned long TELEMETRY_UPLOAD_MS = 15000;
-const unsigned long WASHER_MATCH_DELAY_MS = 3000;  // a washer second can arrive up to ~2 s after it ends
-const long WASHER_MATCH_WINDOW_MS = 550;
-const int TELEMETRY_MAX = 120;
-const int TELEMETRY_BATCH = 30;
-struct TelemetrySample {
-  unsigned long t;
-  float dAvg10, dDoorJumpMax;
-  bool dRunning, dEmpty;
+// ---------------- Reports to the website ----------------
+// One POST carries everything: both machines' status for the website and the 5 s readings
+// for the live graphs. Sent every reportEveryMs, sooner when a status changes; readings stay
+// queued until the server confirms them, so a failed send is simply retried.
+const unsigned long PERIOD_MS = 5000;
+const unsigned long MIN_SEND_GAP_MS = 5000;  // a flickering status can't send faster than this
+const unsigned long RETRY_MIN_MS = 5000;
+const unsigned long RETRY_MAX_MS = 60000;
+const unsigned long WASHER_RECENT_MS = 60000;  // the washer's status is reported only while it is heard
+const int QUEUE_MAX = 120;  // 10 min of 5 s readings
+const int SEND_MAX = 60;    // per POST, so the JSON always fits reportJson
+volatile unsigned long reportEveryMs = 30000;  // the server's reply can change this
+
+template <typename T>
+struct Ring {  // callers hold the matching mutex
+  T items[QUEUE_MAX];
+  int head = 0, count = 0;
+  void push(const T& v) {
+    if (count == QUEUE_MAX) {  // backlog full: drop the oldest
+      head = (head + 1) % QUEUE_MAX;
+      count--;
+    }
+    items[(head + count) % QUEUE_MAX] = v;
+    count++;
+  }
+  const T& at(int i) const {
+    return items[(head + i) % QUEUE_MAX];
+  }
+  void dropThrough(uint32_t seq) {  // removes everything up to and including seq
+    while (count > 0 && (int32_t)(items[head].seq - seq) <= 0) {
+      head = (head + 1) % QUEUE_MAX;
+      count--;
+    }
+  }
 };
-portMUX_TYPE telemetryMux = portMUX_INITIALIZER_UNLOCKED;
-TelemetrySample telemetryBuf[TELEMETRY_MAX];
-int telemetryHead = 0, telemetryCount = 0;
-unsigned long lastTelemetryUpload = 0;
-char telemetryJson[8192];
-float secDoorJumpMax = 0;  // loop() only, closed by recordTelemetrySecond()
+
+struct DryerPeriod {
+  uint32_t seq;
+  unsigned long t;  // millis() when the period ended
+  float avgMax, doorJumpMax;
+  bool running, empty;
+};
+struct WasherRound {
+  uint32_t seq;
+  unsigned long t;  // this dryer's millis() when the round ended, as near as it can tell
+  uint32_t w1, w2, drop;
+  bool running, empty;
+};
+struct ReportStatus {
+  bool dRunning, dEmpty;
+  const char* dSensor;
+  bool wKnown, wRunning, wEmpty, wMicOk;
+  // Only running/empty changes send at once; sensor health rides on the next regular report.
+  bool sameMachineState(const ReportStatus& o) const {
+    return dRunning == o.dRunning && dEmpty == o.dEmpty
+           && (!wKnown || !o.wKnown || (wRunning == o.wRunning && wEmpty == o.wEmpty));
+  }
+};
+
+portMUX_TYPE dryerQMux = portMUX_INITIALIZER_UNLOCKED;
+Ring<DryerPeriod> dryerQ;   // loop() pushes under dryerQMux
+Ring<WasherRound> washerQ;  // the BLE callback pushes under washerMux
+uint32_t dryerSeq = 0, washerSeq = 0;
+uint8_t lastWasherRound = 0;
+unsigned long lastWasherRoundAt = 0;
+bool washerRoundSeen = false;
+unsigned long periodStart = 0;
+float periodAvgMax = 0, periodDoorJumpMax = 0;  // loop() only, closed by closeDryerPeriod()
+uint32_t bootId = 0;   // with batchNo, lets the server replace a batch it already stored
+uint32_t batchNo = 0;  // advances only on success, so a retry reuses it
+DryerPeriod sendD[SEND_MAX];
+WasherRound sendW[SEND_MAX];
+char reportJson[8192];
+size_t reportLen = 0;
 
 static void putU16(uint8_t* p, uint32_t v) {
   p[0] = v;
@@ -265,11 +282,16 @@ static uint32_t toU32(double v) {
   return v >= 4294967295.0 ? 4294967295UL : (uint32_t)(v + 0.5);
 }
 
-// Called with washerMux held. Keeps the earliest arrival time, the closest to when the second ended.
-void storeWasherSecond(uint8_t counter, unsigned long t, const uint8_t* p, bool isRunning, bool isEmpty) {
-  WasherSecond& s = washerRing[counter % WASHER_RING];
-  if (s.valid && s.counter == counter && (long)(t - s.t) < 20000) return;
-  s = { true, counter, t, getU24(p), getU24(p + 3), getU24(p + 6), isRunning, isEmpty };
+// Called with washerMux held. Each packet repeats the washer's last two rounds, so each round
+// is queued once, the first time it is heard; a lower counter after silence is a washer reboot.
+void queueWasherRound(uint8_t counter, unsigned long t, const uint8_t* p, bool isRunning, bool isEmpty) {
+  int8_t ahead = (int8_t)(counter - lastWasherRound);
+  bool rebooted = ahead < -2 && t - lastWasherRoundAt > 15000;
+  if (washerRoundSeen && ahead <= 0 && !rebooted) return;
+  washerQ.push({ ++washerSeq, t, getU24(p), getU24(p + 3), getU24(p + 6), isRunning, isEmpty });
+  lastWasherRound = counter;
+  lastWasherRoundAt = t;
+  washerRoundSeen = true;
 }
 
 class MyAdvertisedDeviceCallbacks : public NimBLEScanCallbacks {
@@ -295,14 +317,14 @@ class MyAdvertisedDeviceCallbacks : public NimBLEScanCallbacks {
     washerAckVersion = getU16(b + 6);
     washerHeard = true;
     washerLastHeardMs = now;
-    if (st & ST_CUR_VALID) storeWasherSecond(b[8], now, b + 9, st & ST_RUNNING, st & ST_EMPTY);
-    if (st & ST_PREV_VALID) storeWasherSecond((uint8_t)(b[8] - 1), now - 1000, b + 18, st & ST_PREV_RUNNING, st & ST_PREV_EMPTY);
+    if (st & ST_PREV_VALID) queueWasherRound((uint8_t)(b[8] - 1), now - PERIOD_MS, b + 18, st & ST_PREV_RUNNING, st & ST_PREV_EMPTY);
+    if (st & ST_CUR_VALID) queueWasherRound(b[8], now, b + 9, st & ST_RUNNING, st & ST_EMPTY);
     portEXIT_CRITICAL(&washerMux);
 
     if (changed) {
-      Serial.printf("[BLE RX] washer rssi=%d running=%d empty=%d mic=%d config=v%u test=%d\n",
+      Serial.printf("[BLE RX] washer rssi=%d running=%d empty=%d mic=%d config=v%u\n",
                     advertisedDevice->getRSSI(), bool(st & ST_RUNNING), bool(st & ST_EMPTY),
-                    bool(st & ST_MIC_OK), (unsigned)getU16(b + 6), bool(st & ST_TEST));
+                    bool(st & ST_MIC_OK), (unsigned)getU16(b + 6));
     }
   }
 };
@@ -543,7 +565,8 @@ void setup() {
 
   nodeSalt = (uint32_t)(ESP.getEfuseMac() & 0xFFFFFF);
   randomSeed(nodeSalt ^ esp_random());
-  preventiveRebootUs = (uint64_t)(86400000UL + (nodeSalt % 21600000UL)) * 1000ULL;  // 24 h + up to ~4.7 h
+  bootId = esp_random();
+  preventiveRebootUs = (uint64_t)(86400000UL + (nodeSalt % 21600000UL)) * 1000ULL;  // 24 h + up to 6 h
 
   Serial.println("\n\n========================================");
   Serial.println("   Dryer Monitor");
@@ -600,7 +623,7 @@ void setup() {
 
   loadSavedConfig();
 
-  // Bluetooth: broadcast thresholds and test mode to the washer, and listen for its packets.
+  // Bluetooth: broadcast thresholds to the washer, and listen for its packets.
   NimBLEDevice::init("");
   pAdvertising = NimBLEDevice::getAdvertising();
   pAdvertising->setConnectableMode(BLE_GAP_CONN_MODE_NON);
@@ -610,13 +633,14 @@ void setup() {
   pAdvertising->start();
 
   pBLEScan = NimBLEDevice::getScan();
-  pBLEScan->setScanCallbacks(new MyAdvertisedDeviceCallbacks(), true);  // every packet: test mode needs each second
+  pBLEScan->setScanCallbacks(new MyAdvertisedDeviceCallbacks(), true);  // every packet, not just new devices
   pBLEScan->setMaxResults(0);  // callback only; never cache results next to eduroam's TLS buffers
   pBLEScan->setActiveScan(false);
-  pBLEScan->setInterval(100);
-  pBLEScan->setWindow(99);
-  pBLEScan->start(2000, false);  // returns at once; listens for 2 s in the background
-  lastBleScanTime = millis();
+  pBLEScan->setInterval(160);  // 100 ms
+  pBLEScan->setWindow(48);     // 30 ms of it listening
+  pBLEScan->start(0, false, true);
+
+  periodStart = millis();
 
   // WiFi and uploads on core 0, so a slow HTTPS POST or a 30 s eduroam join never pauses the MPU.
   xTaskCreatePinnedToCore(networkTask, "network", 12288, NULL, 1, NULL, 0);
@@ -637,7 +661,7 @@ void publishDryer() {
   portEXIT_CRITICAL(&dryerMux);
 }
 
-// ---------------- Website thresholds and test-mode readings ----------------
+// ---------------- Website thresholds and readings ----------------
 void applyDryerConfig() {
   static uint32_t seen = 0;
   if (seen == cfgSeq) return;
@@ -660,14 +684,12 @@ void loadSavedConfig() {
   Serial.printf("[CONFIG] Using saved website thresholds v%d\n", saved.version);
 }
 
-// Reply to every status report and telemetry upload: test mode, plus saved thresholds if any.
+// The reply to every report: how often to report, plus saved thresholds if any.
 void applyServerReply(const String& body) {
   JsonDocument doc;
   if (deserializeJson(doc, body)) return;
-  if (doc["testMode"].is<bool>()) {
-    bool on = doc["testMode"].as<bool>();
-    if (on != testMode) Serial.printf("[TEST] Test mode %s\n", on ? "ON" : "off");
-    testMode = on;
+  if (doc["reportEveryS"].is<int>()) {
+    reportEveryMs = constrain(doc["reportEveryS"].as<int>(), 15, 90) * 1000UL;
   }
 
   JsonObject c = doc["config"].as<JsonObject>();
@@ -685,7 +707,7 @@ void applyServerReply(const String& body) {
   n.fullMs = c["washerFullTimerMs"].as<unsigned long>();
   n.maxCycleMs = c["washerMaxCycleMs"].as<unsigned long>();
   if (n.dryerOn <= 0 || n.dryerDoor <= 0 || n.firstFill <= 0 || n.refill <= 0 || n.doorDrop <= 0
-      || n.refillMs == 0 || n.fullMs == 0 || n.maxCycleMs < n.fullMs || (n.refillBands != 1 && n.refillBands != 2)) {
+      || n.refillMs == 0 || n.fullMs == 0 || n.maxCycleMs < n.fullMs || n.refillBands < 1 || n.refillBands > 3) {
     Serial.printf("[CONFIG] Ignored invalid website thresholds v%d\n", n.version);
     return;
   }
@@ -711,10 +733,10 @@ int reportedConfigVersion() {
   return heard ? min(appliedConfigVersion, (int)ack) : appliedConfigVersion;
 }
 
-// What the washer listens for: test mode, plus its thresholds once the website has saved some.
+// What the washer listens for: its thresholds once the website has saved some.
 void updateDryerAdvert() {
   uint8_t b[LINK_LEN] = { 0xFF, 0xFF, 'B', 'D', pairNumber };
-  uint8_t flags = testMode ? DF_TEST : 0;
+  uint8_t flags = 0;
   if (appliedConfigVersion > 0) {
     NodeConfig c;
     portENTER_CRITICAL(&cfgMux);
@@ -722,6 +744,7 @@ void updateDryerAdvert() {
     portEXIT_CRITICAL(&cfgMux);
     flags |= DF_HAS_CONFIG;
     if (c.refillBands == 2) flags |= DF_BANDS2;
+    if (c.refillBands == 3) flags |= DF_BANDS3;
     putU16(b + 5, c.version);
     putU24(b + 8, toU24(c.firstFill));
     putU24(b + 11, toU24(c.refill));
@@ -739,77 +762,30 @@ void updateDryerAdvert() {
 
 void serviceDryerAdvert() {
   static int sentVersion = -1;
-  static int sentTest = -1;
-  if (sentVersion == appliedConfigVersion && sentTest == (int)testMode) return;
+  if (sentVersion == appliedConfigVersion) return;
   sentVersion = appliedConfigVersion;
-  sentTest = testMode;
   updateDryerAdvert();
 }
 
-// Outside test mode: 2 s out of every 20 s. In test mode: ~30% of the time, so every
-// washer second (each packet carries two) arrives while leaving most airtime to eduroam.
+// Always listening ~30% of the time: each washer packet carries two 5 s rounds, so every
+// round arrives while most of the airtime is left to eduroam.
 void serviceBleScan() {
-  if (testMode) {
-    if (!continuousScan || !pBLEScan->isScanning()) {
-      continuousScan = true;
-      pBLEScan->stop();
-      pBLEScan->setInterval(160);
-      pBLEScan->setWindow(48);
-      pBLEScan->start(0, false, true);  // 0 = until stopped
-      Serial.println("[BLE] Test mode: listening for every washer second");
-    }
-    return;
-  }
-  if (continuousScan) {
-    continuousScan = false;
-    pBLEScan->stop();
-    pBLEScan->setInterval(100);
-    pBLEScan->setWindow(99);
-    lastBleScanTime = millis();
-  }
-  if (millis() - lastBleScanTime >= bleScanInterval) {
-    lastBleScanTime = millis();
-    Serial.printf("[BLE] Sniffing the air for washer %s updates...\n", washerMachineId);
-    pBLEScan->start(2000, false, true);  // returns at once; listens for 2 s in the background
+  if (!pBLEScan->isScanning()) {
+    pBLEScan->start(0, false, true);  // 0 = until stopped
   }
 }
 
-// Dryer loop: closes the current one-second window and queues it while test mode is on.
-void recordTelemetrySecond() {
-  static unsigned long lastSecond = 0;
-  if (millis() - lastSecond < 1000) return;
-  lastSecond = millis();
+// loop(): every 5 s, queues the highest readings of the period and the state at its end.
+void closeDryerPeriod() {
+  if (millis() - periodStart < PERIOD_MS) return;
+  periodStart = millis();
 
-  TelemetrySample s = { lastSecond, avg10, secDoorJumpMax, running, empty };
-  secDoorJumpMax = 0;
-
-  if (!testMode) return;
-  portENTER_CRITICAL(&telemetryMux);
-  if (telemetryCount == TELEMETRY_MAX) {  // upload backlog: drop the oldest second
-    telemetryHead = (telemetryHead + 1) % TELEMETRY_MAX;
-    telemetryCount--;
-  }
-  telemetryBuf[(telemetryHead + telemetryCount) % TELEMETRY_MAX] = s;
-  telemetryCount++;
-  portEXIT_CRITICAL(&telemetryMux);
-}
-
-// The washer second that ended closest to t, if any ended within WASHER_MATCH_WINDOW_MS of it.
-bool findWasherSecond(unsigned long t, WasherSecond& out) {
-  long best = WASHER_MATCH_WINDOW_MS;
-  bool found = false;
-  portENTER_CRITICAL(&washerMux);
-  for (int i = 0; i < WASHER_RING; i++) {
-    if (!washerRing[i].valid) continue;
-    long d = labs((long)(washerRing[i].t - t));
-    if (d < best) {
-      best = d;
-      out = washerRing[i];
-      found = true;
-    }
-  }
-  portEXIT_CRITICAL(&washerMux);
-  return found;
+  DryerPeriod p = { 0, periodStart, periodAvgMax, periodDoorJumpMax, running, empty };
+  periodAvgMax = periodDoorJumpMax = 0;
+  portENTER_CRITICAL(&dryerQMux);
+  p.seq = ++dryerSeq;
+  dryerQ.push(p);
+  portEXIT_CRITICAL(&dryerQMux);
 }
 
 // Returns the HTTP code; on 2xx, reply receives the response body.
@@ -826,7 +802,7 @@ int httpPostJson(const char* url, const char* payload, String* reply) {
 
   HTTPClient http;
   http.setConnectTimeout(8000);
-  http.setTimeout(8000);
+  http.setTimeout(20000);  // a slow cold-start reply (-11) is not a lost upload
   if (!http.begin(client, url)) {
     Serial.println("❌ Could not start the HTTPS session");
     return -1;
@@ -841,146 +817,161 @@ int httpPostJson(const char* url, const char* payload, String* reply) {
 
   int code = http.POST((uint8_t*)payload, strlen(payload));
   if (reply && code >= 200 && code < 300) *reply = http.getString();
+  if (code < 0) {
+    char tlsErr[100] = "";
+    client.lastError(tlsErr, sizeof(tlsErr));
+    Serial.printf("[HTTP] %s; tls: %s; rssi=%d dBm; maxAlloc=%u\n", HTTPClient::errorToString(code).c_str(),
+                  tlsErr[0] ? tlsErr : "none", WiFi.RSSI(), (unsigned)ESP.getMaxAllocHeap());
+  }
   http.end();
   return code;
 }
 
-// Network task: while test mode is on, uploads the queued seconds every ~15 s, each paired
-// with the washer second that ended at the same time.
-void serviceTelemetry() {
-  if (!testMode) {
-    portENTER_CRITICAL(&telemetryMux);
-    telemetryCount = 0;
-    portEXIT_CRITICAL(&telemetryMux);
-    return;
-  }
-  if (WiFi.status() != WL_CONNECTED || millis() - lastTelemetryUpload < TELEMETRY_UPLOAD_MS) return;
-  lastTelemetryUpload = millis();
-
-  // Only seconds old enough that the washer's matching second has had time to arrive.
-  TelemetrySample batch[TELEMETRY_BATCH];
-  int n = 0;
-  unsigned long cutoff = millis() - WASHER_MATCH_DELAY_MS;
-  portENTER_CRITICAL(&telemetryMux);
-  while (n < telemetryCount && n < TELEMETRY_BATCH) {
-    const TelemetrySample& s = telemetryBuf[(telemetryHead + n) % TELEMETRY_MAX];
-    if ((long)(s.t - cutoff) > 0) break;
-    batch[n++] = s;
-  }
-  portEXIT_CRITICAL(&telemetryMux);
-  if (n == 0) return;
-
-  bool heard, wr, we;
-  unsigned long lastHeard;
-  portENTER_CRITICAL(&washerMux);
-  heard = washerHeard;
-  wr = washerRunning;
-  we = washerEmpty;
-  lastHeard = washerLastHeardMs;
-  portEXIT_CRITICAL(&washerMux);
-  bool washerRecent = heard && millis() - lastHeard < 60000;
-
-  size_t len = snprintf(telemetryJson, sizeof(telemetryJson),
-                        "{\"machineId\":\"%s\",\"configVersion\":%d,\"samples\":[",
-                        machineId, reportedConfigVersion());
-  for (int i = 0; i < n; i++) {
-    const TelemetrySample& s = batch[i];
-    len += snprintf(telemetryJson + len, sizeof(telemetryJson) - len,
-                    "%s{\"dAvg10\":%.3f,\"dDoorJumpMax\":%.3f,\"dRunning\":%d,\"dEmpty\":%d",
-                    i ? "," : "", s.dAvg10, s.dDoorJumpMax, s.dRunning, s.dEmpty);
-    WasherSecond w;
-    if (findWasherSecond(s.t, w)) {
-      len += snprintf(telemetryJson + len, sizeof(telemetryJson) - len,
-                      ",\"wWater1Max\":%lu,\"wWater2Max\":%lu,\"wDoorDropMax\":%lu,\"wRunning\":%d,\"wEmpty\":%d",
-                      (unsigned long)w.w1, (unsigned long)w.w2, (unsigned long)w.drop, w.running, w.empty);
-    } else if (washerRecent) {
-      len += snprintf(telemetryJson + len, sizeof(telemetryJson) - len,
-                      ",\"wRunning\":%d,\"wEmpty\":%d", wr, we);
-    }
-    len += snprintf(telemetryJson + len, sizeof(telemetryJson) - len, "}");
-  }
-  snprintf(telemetryJson + len, sizeof(telemetryJson) - len, "]}");
-
-  String reply;
-  int code = httpPostJson(telemetryUrl, telemetryJson, &reply);
-  netHeartbeat = millis();
-  if (code < 200 || code >= 300) {
-    Serial.printf("❌ Telemetry upload failed: %d\n", code);
-    return;
-  }
-  portENTER_CRITICAL(&telemetryMux);
-  int sent = min(n, telemetryCount);
-  telemetryHead = (telemetryHead + sent) % TELEMETRY_MAX;
-  telemetryCount -= sent;
-  portEXIT_CRITICAL(&telemetryMux);
-  applyServerReply(reply);
+// Appends to reportJson; false if it would not fit, so a cut-off report is never sent.
+bool appendJson(const char* fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  int n = vsnprintf(reportJson + reportLen, sizeof(reportJson) - reportLen, fmt, args);
+  va_end(args);
+  if (n < 0 || reportLen + n >= sizeof(reportJson)) return false;
+  reportLen += n;
+  return true;
 }
 
-// Backoff applies only after a failure, and each target has its own slot so the
-// dryer and the relayed washer can never starve one another.
-bool tryUpload(UploadSlot& slot, const char* id, bool isRunning, bool isEmpty,
-               const char* stateStr, bool isRelay) {
-  if ((long)(millis() - slot.nextAttempt) < 0) {  // rollover-safe
+ReportStatus readReportStatus() {
+  ReportStatus s;
+  portENTER_CRITICAL(&dryerMux);
+  s.dRunning = pubRunning;
+  s.dEmpty = pubEmpty;
+  s.dSensor = pubSensorState;
+  portEXIT_CRITICAL(&dryerMux);
+  unsigned long now = millis();
+  portENTER_CRITICAL(&washerMux);
+  // Signed: a packet heard just after `now` was read must not look 49 days old.
+  s.wKnown = washerHeard && (long)(now - washerLastHeardMs) < (long)WASHER_RECENT_MS;
+  s.wRunning = washerRunning;
+  s.wEmpty = washerEmpty;
+  s.wMicOk = washerMicOk;
+  portEXIT_CRITICAL(&washerMux);
+  return s;
+}
+
+// One POST with both machines' status and the queued 5 s readings. Readings leave the queue
+// only once the server confirms them; a retry reuses batchNo, so the server replaces, never duplicates.
+bool sendReport(const ReportStatus& st) {
+  int nd = 0, nw = 0;
+  portENTER_CRITICAL(&dryerQMux);
+  for (; nd < dryerQ.count && nd < SEND_MAX; nd++) sendD[nd] = dryerQ.at(nd);
+  portEXIT_CRITICAL(&dryerQMux);
+  portENTER_CRITICAL(&washerMux);
+  for (; nw < washerQ.count && nw < SEND_MAX; nw++) sendW[nw] = washerQ.at(nw);
+  portEXIT_CRITICAL(&washerMux);
+
+  unsigned long now = millis();
+  reportLen = 0;
+  bool fits = appendJson("{\"v\":2,\"machineId\":\"%s\",\"washerId\":\"%s\",\"boot\":%lu,\"batch\":%lu,"
+                         "\"configVersion\":%d,\"uptime\":%lu,\"resetReason\":%d,\"freeHeap\":%u,"
+                         "\"dryer\":{\"running\":%s,\"empty\":%s,\"sensorState\":\"%s\"},\"washer\":",
+                         machineId, washerMachineId, (unsigned long)bootId, (unsigned long)batchNo,
+                         reportedConfigVersion(), (unsigned long)(esp_timer_get_time() / 1000000),
+                         (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap(),
+                         st.dRunning ? "true" : "false", st.dEmpty ? "true" : "false", st.dSensor);
+  if (st.wKnown) {
+    fits = fits && appendJson("{\"running\":%s,\"empty\":%s,\"micOk\":%s}", st.wRunning ? "true" : "false",
+                              st.wEmpty ? "true" : "false", st.wMicOk ? "true" : "false");
+  } else {
+    fits = fits && appendJson("null");
+  }
+  // [age ms, highest avg10, highest door jump, running, empty]
+  fits = fits && appendJson(",\"d\":[");
+  for (int i = 0; fits && i < nd; i++) {
+    const DryerPeriod& p = sendD[i];
+    // A nan would make the whole report invalid JSON.
+    fits = appendJson("%s[%lu,%.3f,%.3f,%d,%d]", i ? "," : "", now - p.t, isfinite(p.avgMax) ? p.avgMax : 0.0f,
+                      isfinite(p.doorJumpMax) ? p.doorJumpMax : 0.0f, p.running, p.empty);
+  }
+  // [age ms, highest water 1, highest water 2, highest door drop, running, empty]
+  fits = fits && appendJson("],\"w\":[");
+  for (int i = 0; fits && i < nw; i++) {
+    const WasherRound& r = sendW[i];
+    fits = appendJson("%s[%lu,%lu,%lu,%lu,%d,%d]", i ? "," : "", now - r.t, (unsigned long)r.w1,
+                      (unsigned long)r.w2, (unsigned long)r.drop, r.running, r.empty);
+  }
+  fits = fits && appendJson("]}");
+  if (!fits) {
+    Serial.println("❌ Report did not fit its buffer");
     return false;
   }
-  if (sendCustomStatusUpdate(id, isRunning, isEmpty, stateStr, isRelay)) {
-    slot.backoff = 0;
-    slot.nextAttempt = millis();
-    return true;
+
+  String reply;
+  unsigned long postStart = millis();
+  int code = httpPostJson(serverUrl, reportJson, &reply);
+  netHeartbeat = millis();
+  // A 4xx is the server refusing this report, so resending it can't help and would block every
+  // later status. Its readings are dropped; the status goes out again with the next report.
+  bool rejected = code >= 400 && code < 500 && code != 408 && code != 429;
+  if ((code < 200 || code >= 300) && !rejected) {
+    Serial.printf("❌ Report failed: %d (%s) after %lu ms, rssi=%d dBm, maxAlloc=%u, queued d=%d w=%d\n", code,
+                  HTTPClient::errorToString(code).c_str(), millis() - postStart, (int)WiFi.RSSI(),
+                  (unsigned)ESP.getMaxAllocHeap(), nd, nw);
+    if (++consecutiveHttpFailures >= MAX_HTTP_FAILURES) {
+      Serial.println("[WIFI] Repeated report failures. Requesting a clean re-join.");
+      consecutiveHttpFailures = 0;
+      wifiReinitRequested = true;  // serviced by maintainWiFiConnection(), never nested in a POST
+    }
+    return false;
   }
-  slot.backoff = slot.backoff ? min(slot.backoff * 2, UPLOAD_BACKOFF_MAX) : 5000UL;
-  slot.nextAttempt = millis() + slot.backoff + random(0, 2000);
-  return false;
+
+  consecutiveHttpFailures = 0;
+  batchNo++;
+  portENTER_CRITICAL(&dryerQMux);
+  if (nd > 0) dryerQ.dropThrough(sendD[nd - 1].seq);
+  portEXIT_CRITICAL(&dryerQMux);
+  portENTER_CRITICAL(&washerMux);
+  if (nw > 0) washerQ.dropThrough(sendW[nw - 1].seq);
+  portEXIT_CRITICAL(&washerMux);
+  if (rejected) {
+    Serial.printf("❌ Report rejected by the server: %d, dropped d=%d w=%d\n", code, nd, nw);
+    return false;
+  }
+  applyServerReply(reply);
+  Serial.printf("✅ Report %d: d=%d w=%d dryer run=%d empty=%d, washer %s, heap=%u\n", code, nd, nw,
+                st.dRunning, st.dEmpty, st.wKnown ? (st.wRunning ? "running" : "idle") : "not heard",
+                (unsigned)ESP.getFreeHeap());
+  return true;
 }
 
-// Washer relay and dryer reporting, on the network task so the MPU never waits on HTTPS.
-void serviceUploads() {
-  unsigned long currentTime = millis();
+// Network task: a report every reportEveryMs, sooner when a status changes or readings back up.
+void serviceReports() {
+  static bool sentOnce = false;
+  static ReportStatus lastSent;
+  static unsigned long lastSentAt = 0, lastTryAt = 0, retryDelay = 0;
+  if (WiFi.status() != WL_CONNECTED) return;
 
-  // WASHER NETWORK ROUTER: snapshot the pair atomically so we can never relay a
-  // torn combination, and compare-and-clear so a change during a POST is not lost.
-  bool wr, we, heard, micOk;
+  unsigned long now = millis();
+  if (retryDelay && now - lastTryAt < retryDelay) return;
+
+  ReportStatus st = readReportStatus();
+  bool backlog;
+  portENTER_CRITICAL(&dryerQMux);
+  backlog = dryerQ.count > SEND_MAX;
+  portEXIT_CRITICAL(&dryerQMux);
   portENTER_CRITICAL(&washerMux);
-  wr = washerRunning;
-  we = washerEmpty;
-  heard = washerHeard;
-  micOk = washerMicOk;
+  backlog = backlog || washerQ.count > SEND_MAX;
   portEXIT_CRITICAL(&washerMux);
 
-  if (heard && (!washerRelayedOnce || wr != lastRelayedWasherRunning || we != lastRelayedWasherEmpty
-                || micOk != lastRelayedWasherMicOk)) {
-    if (tryUpload(washerSlot, washerMachineId, wr, we, micOk ? SENSOR_OK : SENSOR_FLAT, true)) {
-      lastRelayedWasherRunning = wr;
-      lastRelayedWasherEmpty = we;
-      lastRelayedWasherMicOk = micOk;
-      washerRelayedOnce = true;
-    }
-  }
+  bool due = !sentOnce || now - lastSentAt >= reportEveryMs
+             || ((!st.sameMachineState(lastSent) || backlog) && now - lastSentAt >= MIN_SEND_GAP_MS);
+  if (!due) return;
 
-  bool dr, de;
-  const char* ds;
-  portENTER_CRITICAL(&dryerMux);
-  dr = pubRunning;
-  de = pubEmpty;
-  ds = pubSensorState;
-  portEXIT_CRITICAL(&dryerMux);
-
-  if (!reportedOnce || dr != lastReportedRunning || de != lastReportedEmpty) {
-    if (tryUpload(dryerSlot, machineId, dr, de, ds, false)) {
-      lastReportedRunning = dr;
-      lastReportedEmpty = de;
-      reportedOnce = true;
-      lastSendTime = currentTime;
-    }
-  }
-
-  if (currentTime - lastSendTime >= sendInterval) {
-    if (tryUpload(dryerSlot, machineId, dr, de, ds, false)) {
-      lastReportedRunning = dr;
-      lastReportedEmpty = de;
-      reportedOnce = true;
-      lastSendTime = currentTime;  // only on success, or the server TTL flaps
-    }
+  lastTryAt = now;
+  if (sendReport(st)) {
+    sentOnce = true;
+    lastSent = st;
+    lastSentAt = millis();
+    retryDelay = 0;
+  } else {
+    retryDelay = min(retryDelay ? retryDelay * 2 : RETRY_MIN_MS, RETRY_MAX_MS) + random(0, 2000);
   }
 }
 
@@ -992,8 +983,7 @@ void networkTask(void* parameter) {
     maintainWiFiConnection();
     serviceBleScan();
     serviceDryerAdvert();
-    serviceUploads();
-    serviceTelemetry();
+    serviceReports();
     vTaskDelay(pdMS_TO_TICKS(200));
   }
 }
@@ -1001,7 +991,7 @@ void networkTask(void* parameter) {
 void loop() {
   loopHeartbeat = millis();
   applyDryerConfig();
-  recordTelemetrySecond();
+  closeDryerPeriod();
 
   if (!record_mpu_accel()) {
     if (++consecutiveI2cFailures >= MAX_I2C_FAILURES) {
@@ -1041,6 +1031,7 @@ void loop() {
     idxtwo = (idxtwo + 1) % WINDOWTWO;
 
     avg10 = sum10 / WINDOWTWO;
+    if (avg10 > periodAvgMax) periodAvgMax = avg10;
 
     if (avg10 > DYRERONTHRESHHOLD) {
       running = true;
@@ -1052,7 +1043,7 @@ void loop() {
 
   float activitysmall3ago = activitysmallHistory[activitysmallIdx];  //This stores value of small acitivty change from 0.15 seconds ago to compare it to current small activity change to see if door opened/closed
   //As idxthree was incremented before this, it now points to the item of the array that was recorded last, 3 cycles ago (0.15s)
-  if (activitysmall - activitysmall3ago > secDoorJumpMax) secDoorJumpMax = activitysmall - activitysmall3ago;
+  if (activitysmall - activitysmall3ago > periodDoorJumpMax) periodDoorJumpMax = activitysmall - activitysmall3ago;
 
   if (!running && !empty) {
     if (activitysmall > (activitysmall3ago + DOORCLOSINGCHANGE)) {
@@ -1187,70 +1178,6 @@ bool record_mpu_accel() {
     return false;
   }
   return true;
-}
-
-bool sendCustomStatusUpdate(const char* targetMachineId, bool isRunning, bool isEmpty,
-                            const char* stateStr, bool isRelay) {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.print("❌ Network dropped: Deferred update payload for ");
-    Serial.println(targetMachineId);
-    return false;
-  }
-
-  // Fixed buffer instead of String concatenation: no transient small allocations
-  // dropped into freed TLS regions, and no silent empty payload on alloc failure.
-  char jsonPayload[256];
-  if (isRelay) {
-    // Uptime, heap and reset reason belong to this node, not to the washer we are
-    // speaking for, so they are left out rather than reported as the washer's.
-    snprintf(jsonPayload, sizeof(jsonPayload),
-             "{\"machineId\":\"%s\",\"running\":%s,\"empty\":%s,"
-             "\"sensorState\":\"%s\"}",
-             targetMachineId,
-             isRunning ? "true" : "false",
-             isEmpty ? "true" : "false",
-             stateStr);
-  } else {
-    snprintf(jsonPayload, sizeof(jsonPayload),
-             "{\"machineId\":\"%s\",\"running\":%s,\"empty\":%s,"
-             "\"sensorState\":\"%s\","
-             "\"resetReason\":%d,\"uptime\":%lu,\"freeHeap\":%u,\"configVersion\":%d}",
-             targetMachineId,
-             isRunning ? "true" : "false",
-             isEmpty ? "true" : "false",
-             stateStr,
-             (int)esp_reset_reason(),
-             (unsigned long)(esp_timer_get_time() / 1000000),
-             (unsigned)ESP.getFreeHeap(),
-             reportedConfigVersion());
-  }
-
-  String reply;
-  int httpResponseCode = httpPostJson(serverUrl, jsonPayload, &reply);
-  netHeartbeat = millis();
-
-  bool ok = (httpResponseCode >= 200 && httpResponseCode < 300);
-
-  if (ok) {
-    applyServerReply(reply);
-    Serial.printf("✅ Server Status [%s]: %d (running=%d empty=%d heap=%u)\n",
-                  targetMachineId, httpResponseCode, isRunning, isEmpty,
-                  (unsigned)ESP.getFreeHeap());
-    consecutiveHttpFailures = 0;
-    return true;
-  }
-
-  Serial.printf("❌ Transmission Error [%s]: %d (freeHeap=%u maxAlloc=%u)\n",
-                targetMachineId, httpResponseCode,
-                (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
-
-  if (++consecutiveHttpFailures >= MAX_HTTP_FAILURES) {
-    Serial.println("[WIFI] Repeated upload failures. Requesting a clean re-join.");
-    consecutiveHttpFailures = 0;
-    wifiReinitRequested = true;  // serviced in loop(); never nest a 30 s connect here
-  }
-
-  return false;
 }
 
 void print_accels() {

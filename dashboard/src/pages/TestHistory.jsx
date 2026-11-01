@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { usePolling } from '../hooks/usePolling';
 import { parseMachineId, trialLabel, TRIAL_MACHINE_IDS } from '../utils/machineLabel';
 import styles from './TestHistory.module.css';
 
@@ -93,11 +94,7 @@ export default function TestHistory() {
     }
   }, [machineFilter]);
 
-  useEffect(() => {
-    refresh();
-    const interval = setInterval(refresh, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [refresh]);
+  usePolling(refresh, POLL_INTERVAL_MS);
 
   const machineIds = [...new Set(records.map((r) => r.machineId))].sort((a, b) =>
     trialLabel(a).localeCompare(trialLabel(b), undefined, { numeric: true })

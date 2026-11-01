@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { usePolling } from '../hooks/usePolling';
 import { parseMachineId, trialLabel, TRIAL_MACHINE_IDS } from '../utils/machineLabel';
 import styles from './TestMachines.module.css';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://laun-dryer.vercel.app';
-const POLL_INTERVAL_MS = 5000;
+const POLL_INTERVAL_MS = 15000;
 
 // esp_reset_reason_t. 9 means the supply dipped; 3 means our own watchdog fired.
 const RESET_REASONS = {
@@ -137,11 +138,7 @@ export default function TestMachines() {
     }
   }, []);
 
-  useEffect(() => {
-    refresh();
-    const interval = setInterval(refresh, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [refresh]);
+  usePolling(refresh, POLL_INTERVAL_MS);
 
   const ids = Object.keys(machines)
     .filter((id) => TRIAL_MACHINE_IDS.includes(id))

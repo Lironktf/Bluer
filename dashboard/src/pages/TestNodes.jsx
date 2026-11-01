@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { adminFetch, formatAgo, formatRemaining, nodeLabel } from '../utils/adminApi';
+import { usePolling } from '../hooks/usePolling';
+import { adminFetch, formatAgo, nodeLabel } from '../utils/adminApi';
 import styles from './TestAdmin.module.css';
 
 const POLL_INTERVAL_MS = 15000;
 const publicPageLock = () => {};
-const TEST_MODE_LENGTHS = [15, 30, 60, 120, 240];
 
 // Timers are stored in ms on the node; shown here in minutes.
 const FIELDS = [
@@ -13,7 +13,7 @@ const FIELDS = [
   { key: 'dryerDoorChange', label: 'Dryer door change', step: 0.05 },
   { key: 'washerFirstFill', label: 'Washer first fill', step: 500 },
   { key: 'washerRefill', label: 'Washer refill', step: 500 },
-  { key: 'washerRefillBands', label: 'Refill bands (1 = 7.9–9.8 kHz only, 2 = either)', step: 1 },
+  { key: 'washerRefillBands', label: 'Refill bands (1 = 7.9–9.8 kHz, 2 = either, 3 = 9.8–11.6 kHz)', step: 1 },
   { key: 'washerDoorDrop', label: 'Washer door drop', step: 10000 },
   { key: 'washerRefillTimerMs', label: 'Refill timer (min)', minutes: true, step: 0.5 },
   { key: 'washerFullTimerMs', label: 'First-fill timer (min)', minutes: true, step: 0.5 },
@@ -34,9 +34,7 @@ function NodeCard({ node, limits, onSaved, onUnauthorized }) {
   const [values, setValues] = useState(initial);
   const [edited, setEdited] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null);
-  const [minutes, setMinutes] = useState(60);
 
   const dirty = edited && FIELDS.some((f) => values[f.key] !== initial[f.key]);
 
@@ -65,18 +63,6 @@ function NodeCard({ node, limits, onSaved, onUnauthorized }) {
     setSaving(false);
   };
 
-  const setTestMode = async (on) => {
-    setBusy(true);
-    const { ok, status, data } = await adminFetch('kind=testmode', {
-      method: 'PUT',
-      body: { nodeId: node.nodeId, on, minutes },
-    });
-    if (status === 401) return onUnauthorized();
-    setMessage(ok ? null : data?.error || 'Could not change test mode.');
-    await onSaved();
-    setBusy(false);
-  };
-
   let status;
   if (!node.saved) status = <span className={styles.muted}>Built-in values (nothing saved yet)</span>;
   else if (node.appliedVersion === node.version) status = <span className={styles.ok}>v{node.version} applied {formatAgo(node.appliedAt)}</span>;
@@ -97,23 +83,8 @@ function NodeCard({ node, limits, onSaved, onUnauthorized }) {
             <span className={styles.id}>{node.nodeId}</span> · last report {formatAgo(node.lastSeen)} · {status}
           </p>
         </div>
-        <div className={styles.testMode}>
-          {node.testMode ? (
-            <>
-              <span className={styles.liveBadge}>TEST MODE ON · {formatRemaining(node.testModeUntil)}</span>
-              <Link to={`/test/live?node=${encodeURIComponent(node.nodeId)}`}>Live readings</Link>
-              <button type="button" onClick={() => setTestMode(false)} disabled={busy}>Stop</button>
-            </>
-          ) : (
-            <>
-              <select value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} aria-label="Test mode length">
-                {TEST_MODE_LENGTHS.map((m) => (
-                  <option key={m} value={m}>{m} min</option>
-                ))}
-              </select>
-              <button type="button" onClick={() => setTestMode(true)} disabled={busy}>Start test mode</button>
-            </>
-          )}
+        <div className={styles.nodeLinks}>
+          <Link to={`/test/live?node=${encodeURIComponent(node.nodeId)}`}>Live readings</Link>
         </div>
       </header>
 
@@ -169,6 +140,7 @@ function NodeCard({ node, limits, onSaved, onUnauthorized }) {
 function NodeList({ lock }) {
   const [nodes, setNodes] = useState([]);
   const [limits, setLimits] = useState(null);
+  const [reportEveryS, setReportEveryS] = useState(30);
   const [error, setError] = useState(null);
   const [fetchedAt, setFetchedAt] = useState(null);
   const seqRef = useRef(0);
@@ -182,6 +154,7 @@ function NodeList({ lock }) {
     if (ok) {
       setNodes(data.nodes || []);
       setLimits(data.limits || null);
+      if (typeof data.reportEveryS === 'number') setReportEveryS(data.reportEveryS);
       setFetchedAt(new Date());
       setError(null);
     } else {
@@ -189,17 +162,13 @@ function NodeList({ lock }) {
     }
   }, [lock]);
 
-  useEffect(() => {
-    refresh();
-    const interval = setInterval(refresh, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [refresh]);
+  usePolling(refresh, POLL_INTERVAL_MS);
 
   return (
     <>
       <p className={styles.sub}>
-        These are the exact thresholds each node follows. A node picks up saved changes, and test mode, in the reply to
-        its next report: on any status change, and at least every 5 minutes.
+        These are the exact thresholds each node follows. A node picks up saved changes in the reply to its next report,
+        within about {reportEveryS} seconds.
         {fetchedAt && ` Last fetch ${fetchedAt.toLocaleTimeString()}.`}
       </p>
       {error && <p className={styles.error}>Could not load: {error}</p>}

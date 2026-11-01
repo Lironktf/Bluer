@@ -1,11 +1,9 @@
 // Vercel Serverless Function for test tooling:
 //  - GET  (no kind)          raw heartbeat samples for /test/history (unchanged)
 //  - GET  ?kind=auth         validate the node settings password                [password]
-//  - GET  ?kind=nodes        every node's thresholds, history and test mode
+//  - GET  ?kind=nodes        every node's thresholds and history
 //  - PUT  ?kind=config       save a node's thresholds
-//  - PUT  ?kind=testmode     switch a node's live-readings test mode on or off
-//  - POST ?kind=telemetry    a node uploads per-second readings while in test mode
-//  - GET  ?kind=telemetry    readings for /test/live
+//  - GET  ?kind=telemetry    5 s readings for /test/live (nodes send them inside their reports to machines.js)
 // Kept in this one file on purpose: every file under api/ is a separate Vercel function.
 import crypto from 'crypto';
 import { getCollection } from './lib/mongodb.js';
@@ -18,7 +16,7 @@ const THRESHOLD_LIMITS = {
   dryerDoorChange: [0.05, 10],
   washerFirstFill: [1000, 10000000],
   washerRefill: [1000, 10000000],
-  washerRefillBands: [1, 2],  // 2 = refill on either band, 1 = 7875-9750 Hz band only
+  washerRefillBands: [1, 3],  // 1 = lower band, 2 = either band, 3 = upper band only
   washerRefillTimerMs: [60000, 3600000],
   washerDoorDrop: [10000, 100000000],
   washerFullTimerMs: [60000, 7200000],
@@ -51,15 +49,12 @@ const SJ_OVERRIDES = {
 
 const SJ_NODE_IDS = Array.from({ length: 10 }, (_, i) => `sj-${i + 1}`);
 
-// One value per second, uploaded in batches while test mode is on.
-const TELEMETRY_FIELDS = [
-  'dAvg10', 'dDoorJumpMax', 'dRunning', 'dEmpty',
-  'wWater1Max', 'wWater2Max', 'wDoorDropMax', 'wRunning', 'wEmpty',
-];
-const MAX_SAMPLES_PER_BATCH = 120;
+// How often a node reports. Sent in every reply, so changing it needs a deploy, not a reflash.
+export const REPORT_EVERY_S = 30;
+// 5 s readings per report: [ageMs, ...values]. A retry after a long outage can carry up to 10 min.
+const MAX_READINGS = 120;
+const MAX_READING_AGE_MS = 15 * 60 * 1000;
 const TELEMETRY_TTL_SECONDS = 3 * 24 * 60 * 60;
-const TEST_MODE_DEFAULT_MINUTES = 60;
-const TEST_MODE_MAX_MINUTES = 240;
 
 const NODE_ID_PATTERN = /^[A-Za-z]+-\d{1,3}$/;
 
@@ -81,10 +76,6 @@ function effectiveThresholds(nodeId, doc) {
   return { ...defaultThresholds(nodeId), ...(doc?.thresholds || {}) };
 }
 
-function testModeOn(doc, now = new Date()) {
-  return Boolean(doc?.testModeUntil && new Date(doc.testModeUntil) > now);
-}
-
 async function configReply(nodeId, configVersion) {
   const configs = await getCollection('nodeConfigs');
   const doc = await configs.findOne({ nodeId });
@@ -93,14 +84,15 @@ async function configReply(nodeId, configVersion) {
     await configs.updateOne({ nodeId }, { $set: { appliedVersion: configVersion, appliedAt: new Date() } });
   }
 
-  const reply = { nodeId, testMode: testModeOn(doc) };
+  // testMode: false turns off test mode on nodes still running the older firmware.
+  const reply = { nodeId, testMode: false, reportEveryS: REPORT_EVERY_S };
   if (doc?.thresholds) reply.config = { version: doc.version, ...effectiveThresholds(nodeId, doc) };
   return reply;
 }
 
 /**
  * Called by machines.js on every node report. Returns what the node should follow:
- * its saved thresholds (only once someone has saved them) and whether test mode is on.
+ * how often to report, and its saved thresholds (only once someone has saved them).
  */
 export async function nodeConfigForReport(machineId, configVersion) {
   const nodeId = nodeIdForMachine(machineId);
@@ -198,7 +190,6 @@ async function listNodes(res) {
 
   const byId = Object.fromEntries(configDocs.map((d) => [d.nodeId, d]));
   const ids = new Set([...SJ_NODE_IDS, ...Object.keys(byId), ...Object.keys(lastSeen)]);
-  const now = new Date();
 
   const nodes = [...ids].sort((a, b) => nodeSortKey(a).localeCompare(nodeSortKey(b))).map((nodeId) => {
     const doc = byId[nodeId];
@@ -209,14 +200,12 @@ async function listNodes(res) {
       thresholds: effectiveThresholds(nodeId, doc),
       appliedVersion: doc?.appliedVersion ?? null,
       appliedAt: doc?.appliedAt ?? null,
-      testMode: testModeOn(doc, now),
-      testModeUntil: testModeOn(doc, now) ? doc.testModeUntil : null,
       lastSeen: lastSeen[nodeId] ?? null,
       history: historyDocs.filter((h) => h.nodeId === nodeId).slice(0, 10),
     };
   });
 
-  return res.status(200).json({ success: true, limits: THRESHOLD_LIMITS, nodes });
+  return res.status(200).json({ success: true, limits: THRESHOLD_LIMITS, reportEveryS: REPORT_EVERY_S, nodes });
 }
 
 async function saveConfig(req, res) {
@@ -252,27 +241,6 @@ async function saveConfig(req, res) {
   return res.status(200).json({ success: true, version, changes });
 }
 
-async function setTestMode(req, res) {
-  const { nodeId, on, minutes } = req.body || {};
-  if (typeof nodeId !== 'string' || !NODE_ID_PATTERN.test(nodeId)) {
-    return res.status(400).json({ success: false, error: 'Invalid nodeId' });
-  }
-  if (typeof on !== 'boolean') {
-    return res.status(400).json({ success: false, error: 'on must be true or false' });
-  }
-  const length = Math.min(Math.max(Number(minutes) || TEST_MODE_DEFAULT_MINUTES, 1), TEST_MODE_MAX_MINUTES);
-  const testModeUntil = on ? new Date(Date.now() + length * 60000) : null;
-
-  const configs = await getCollection('nodeConfigs');
-  const now = new Date();
-  await configs.updateOne(
-    { nodeId },
-    { $set: { nodeId, testModeUntil, updatedAt: now }, $setOnInsert: { createdAt: now } },
-    { upsert: true }
-  );
-  return res.status(200).json({ success: true, nodeId, testMode: on, testModeUntil });
-}
-
 let telemetryIndexes = null;
 function ensureTelemetryIndexes(col) {
   if (!telemetryIndexes) {
@@ -287,41 +255,34 @@ function ensureTelemetryIndexes(col) {
   return telemetryIndexes;
 }
 
-async function receiveTelemetry(req, res) {
-  const body = req.body || {};
-  const nodeId = typeof body.nodeId === 'string' && NODE_ID_PATTERN.test(body.nodeId)
-    ? body.nodeId
-    : nodeIdForMachine(body.machineId);
-  if (!nodeId) return res.status(400).json({ success: false, error: 'Missing nodeId or machineId' });
-  if (!Array.isArray(body.samples) || body.samples.length === 0) {
-    return res.status(400).json({ success: false, error: 'samples must be a non-empty array' });
-  }
+// [ageMs, ...values] -> [timeMs, ...values]. Malformed rows are skipped, never stored as a fake 0.
+function toTimedRows(list, width, receivedAt) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .slice(-MAX_READINGS)
+    .filter((row) => Array.isArray(row) && row.length === width && row.every((v) => typeof v === 'number' && Number.isFinite(v)))
+    .map(([age, ...values]) => [receivedAt - Math.min(Math.max(age, 0), MAX_READING_AGE_MS), ...values]);
+}
 
-  const reply = await configReply(nodeId, body.configVersion);
-
-  if (!reply.testMode) {
-    return res.status(200).json({ success: true, stored: 0, ...reply });
-  }
-
-  // Samples are one second apart, oldest first, ending now.
-  const samples = body.samples.slice(-MAX_SAMPLES_PER_BATCH);
-  const end = Date.now();
-  const docs = samples.map((s, i) => {
-    const row = { nodeId, ts: new Date(end - (samples.length - 1 - i) * 1000) };
-    for (const field of TELEMETRY_FIELDS) {
-      const value = s?.[field];
-      // Only real numbers/booleans: Number(null) would store a fake 0.
-      if (typeof value === 'boolean') row[field] = value ? 1 : 0;
-      else if (typeof value === 'number' && Number.isFinite(value)) row[field] = value;
-    }
-    return row;
-  });
+/**
+ * Called by machines.js for every report: stores its 5 s readings, one document per report.
+ * A node retries with the same boot and batch numbers, so a retry replaces the stored batch.
+ *   d rows: [time, highest avg10, highest door jump, running, empty]
+ *   w rows: [time, highest water 7.9-9.8 kHz, highest water 9.8-11.6 kHz, highest door drop, running, empty]
+ */
+export async function storeReadings(nodeId, body, receivedAt) {
+  const d = toTimedRows(body.d, 5, receivedAt);
+  const w = toTimedRows(body.w, 6, receivedAt);
+  if (d.length === 0 && w.length === 0) return;
 
   const telemetry = await getCollection('nodeTelemetry');
   await ensureTelemetryIndexes(telemetry);
-  await telemetry.insertMany(docs);
-
-  return res.status(200).json({ success: true, stored: docs.length, ...reply });
+  const doc = { nodeId, ts: new Date(Math.max(...d.map((r) => r[0]), ...w.map((r) => r[0]))), d, w };
+  if (Number.isInteger(body.boot) && Number.isInteger(body.batch)) {
+    await telemetry.replaceOne({ _id: `${nodeId}:${body.boot}:${body.batch}` }, doc, { upsert: true });
+  } else {
+    await telemetry.insertOne(doc);
+  }
 }
 
 async function readTelemetry(req, res) {
@@ -330,24 +291,36 @@ async function readTelemetry(req, res) {
     return res.status(400).json({ success: false, error: 'Invalid nodeId' });
   }
   const windowMinutes = Math.min(Math.max(Number(minutes) || 15, 1), 180);
-  const since = new Date(Date.now() - windowMinutes * 60000);
+  const since = Date.now() - windowMinutes * 60000;
 
   const [telemetry, configs] = await Promise.all([getCollection('nodeTelemetry'), getCollection('nodeConfigs')]);
-  const [samples, doc] = await Promise.all([
+  const [docs, doc] = await Promise.all([
     telemetry
-      .find({ nodeId, ts: { $gte: since } }, { projection: { nodeId: 0 } })
+      .find({ nodeId, ts: { $gte: new Date(since) } }, { projection: { d: 1, w: 1 } })
       .sort({ ts: -1 })
-      .limit(20000)
+      .limit(2000)
       .toArray(),
     configs.findOne({ nodeId }),
   ]);
-  samples.reverse();
+
+  // One flat list, oldest first: dryer and washer readings are separate samples with their own times.
+  const samples = [];
+  for (const batch of docs) {
+    for (const [t, avg, jump, run, emp] of batch.d || []) {
+      if (t >= since) samples.push({ ts: new Date(t), dAvg10: avg, dDoorJumpMax: jump, dRunning: run, dEmpty: emp });
+    }
+    for (const [t, w1, w2, drop, run, emp] of batch.w || []) {
+      if (t >= since) {
+        samples.push({ ts: new Date(t), wWater1Max: w1, wWater2Max: w2, wDoorDropMax: drop, wRunning: run, wEmpty: emp });
+      }
+    }
+  }
+  samples.sort((a, b) => a.ts - b.ts);
 
   return res.status(200).json({
     success: true,
     nodeId,
-    testMode: testModeOn(doc),
-    testModeUntil: testModeOn(doc) ? doc.testModeUntil : null,
+    reportEveryS: REPORT_EVERY_S,
     thresholds: effectiveThresholds(nodeId, doc),
     samples,
   });
@@ -405,7 +378,6 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET' && !kind) return await readHeartbeats(req, res);
-    if (req.method === 'POST' && kind === 'telemetry') return await receiveTelemetry(req, res);
 
     if (kind === 'auth') {
       if (!(await checkAdmin(req, res))) return;
@@ -413,7 +385,6 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && kind === 'auth') return res.status(200).json({ success: true });
     if (req.method === 'GET' && kind === 'nodes') return await listNodes(res);
     if (req.method === 'PUT' && kind === 'config') return await saveConfig(req, res);
-    if (req.method === 'PUT' && kind === 'testmode') return await setTestMode(req, res);
     if (req.method === 'GET' && kind === 'telemetry') return await readTelemetry(req, res);
 
     return res.status(405).json({ success: false, error: 'Method not allowed' });
