@@ -367,6 +367,7 @@ void hardRestart(const char* why) {
 
 void connectToEduroam() {
   Serial.println("[WIFI] Configuring secure Waterloo eduroam connection...");
+  pBLEScan->stop();
 
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
@@ -638,7 +639,6 @@ void setup() {
   pBLEScan->setActiveScan(false);
   pBLEScan->setInterval(160);  // 100 ms
   pBLEScan->setWindow(48);     // 30 ms of it listening
-  pBLEScan->start(0, false, true);
 
   periodStart = millis();
 
@@ -767,9 +767,14 @@ void serviceDryerAdvert() {
   updateDryerAdvert();
 }
 
-// Always listening ~30% of the time: each washer packet carries two 5 s rounds, so every
-// round arrives while most of the airtime is left to eduroam.
+// Listening ~30% of the time: each washer packet carries two 5 s rounds, so every
+// round arrives while most of the airtime is left to eduroam. Paused while joining
+// so the EAP login gets the shared radio.
 void serviceBleScan() {
+  if (WiFi.status() != WL_CONNECTED) {
+    if (pBLEScan->isScanning()) pBLEScan->stop();
+    return;
+  }
   if (!pBLEScan->isScanning()) {
     pBLEScan->start(0, false, true);  // 0 = until stopped
   }
