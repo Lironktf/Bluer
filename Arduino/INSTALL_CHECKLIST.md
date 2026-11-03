@@ -201,7 +201,7 @@ Use `plot_dryer_washer.py` (or the live readings page, section 7). Write the num
   A retry replaces, never duplicates, what the server already stored.
 - A machine shows offline after 3 missed reports (2 min). The interval is `REPORT_EVERY_S` in
   `dashboard/api/diagnostics.js`: changing it needs a deploy, not a reflash.
-- Readings are auto-deleted after 3 days. The graph shows the last 10 min of the last 30 min fetched and
+- Readings are auto-deleted after 3 days. The graph shows the last 3.5 min of the last 30 min fetched and
   stays where it is when readings stop.
 - Older firmware keeps working during the rollout (5 min heartbeat, 15 min offline), but flash both boards of
   a pair together.
