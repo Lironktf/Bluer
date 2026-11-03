@@ -13,7 +13,20 @@ export default function MachineCard({ machine, onReportBroken, onReportFixed, is
   const [confirming, setConfirming] = useState(null); // 'broken' | 'fixed' | null
 
   const TypeIcon = machine.type === WASHER ? WasherIcon : DryerIcon;
-  const { hasSensor, isFresh, isRunning, isEmpty, flagged } = machine;
+  const { hasSensor, unavailable, isFresh, isRunning, isEmpty, flagged } = machine;
+
+  if (unavailable) {
+    return (
+      <div className={`${styles.card} ${styles.unavailable}`} aria-label={`${machine.label}, live status unavailable`}>
+        <div className={styles.head}>
+          <span className={styles.name}>{machine.label}</span>
+          <TypeIcon className={styles.typeIcon} />
+        </div>
+        <div className={styles.status}>Live status unavailable</div>
+        <div className={styles.fill}>We're working on it</div>
+      </div>
+    );
+  }
 
   // No sensor has ever reported for this slot. Nothing to show, so it collapses
   // to a single quiet line rather than occupying a full card.

@@ -9,7 +9,7 @@ const publicPageLock = () => {};
 const PERIOD_MS = 5000;
 const SUMMARY_SECONDS = 15;
 const FETCH_MINUTES = 30; // the table covers this; graphs show the last CHART_MS of it
-const CHART_MS = 3.5 * 60000;
+const CHART_MS = 2.5 * 60000;
 const DRYER_Y_CAP = 15;
 const WASHER_Y_CAP = 150000;
 const DOOR_Y_CAP = 1000000;

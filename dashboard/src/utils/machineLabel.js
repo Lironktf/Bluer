@@ -12,6 +12,8 @@
 // This replaced an older scheme (a1-m1 .. a1-m20) where odd ids were washers,
 // even ids were dryers, and the numbering ran the opposite way to the stickers.
 
+import { LIVE_STATUS_UNAVAILABLE } from '../config/liveStatusUnavailable';
+
 export const WASHER = 'washer';
 export const DRYER = 'dryer';
 
@@ -127,6 +129,7 @@ export function buildRoomSlots(roomName, statuses = {}, reports = {}) {
         // No sensor has ever reported for this slot -- there is genuinely
         // nothing to display.
         hasSensor,
+        unavailable: LIVE_STATUS_UNAVAILABLE[id] === true,
         // Reading is recent enough to present without qualification.
         isFresh: hasSensor && ageMs < FRESH_WINDOW_MS,
         ageMs,
@@ -177,5 +180,5 @@ export function splitByType(slots) {
  * both are, factually, not running.
  */
 export function countNotRunning(slots) {
-  return slots.filter((s) => s.hasSensor && !s.isRunning).length;
+  return slots.filter((s) => s.hasSensor && !s.unavailable && !s.isRunning).length;
 }

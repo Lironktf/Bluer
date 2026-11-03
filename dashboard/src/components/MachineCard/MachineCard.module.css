@@ -66,6 +66,16 @@
   border-color: var(--color-flag-border);
 }
 
+.unavailable {
+  background-color: #ececea;
+  border-left-color: var(--color-text-light);
+}
+
+.unavailable .name,
+.unavailable .status {
+  color: var(--color-text-tertiary);
+}
+
 /* ---- content ---- */
 
 .head {
