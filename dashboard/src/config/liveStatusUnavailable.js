@@ -19,6 +19,6 @@ export const LIVE_STATUS_UNAVAILABLE = {
   'sj-d8': false,
   'sj-w9': false,
   'sj-d9': false,
-  'sj-w10': false,
-  'sj-d10': false,
+  'sj-w10': true,
+  'sj-d10': true,
 };
