@@ -56,8 +56,11 @@ firmware uses a different BLE format. Use these main sketches, not the nested `*
 | Flash Frequency | **80MHz** | **80MHz** |
 | Port | Attached dryer's port | Attached washer's port |
 
-- [ ] Keep Flash Mode **QIO** and Flash Frequency **80MHz**. DIO / 40MHz made the dryer's eduroam login fail
-  over and over (disconnect reason codes 23 and 202), even though the same board worked on home WiFi
+- [ ] Start with Flash Mode **QIO** and Flash Frequency **80MHz**. The day the dryer kept failing the eduroam
+  login (codes 4, 23, 202) these settings seemed to fix it, but another dryer then failed with the same
+  settings and code, so they may not have been the real fix. On site (Nov 20): confirm a board joins
+  eduroam and reports with these settings; if one keeps failing where another board works, power it off
+  for 15-30 min, retry, and if it still fails swap in a backup board
 - [ ] The dryer does not fit the default app partition. The OTA partition reserves space only; it does not
   mean remote firmware updates are implemented
 - [ ] Leave other board options at the board defaults unless the actual hardware requires otherwise;
@@ -168,6 +171,10 @@ Use `plot_dryer_washer.py` (or the live readings page, section 7). Write the num
       every washer and different from the neighbours' ending at the same time. If found, it can replace timers.
 - [ ] If thresholds end up too close to separate this washer from its neighbours: piezo contact sensor on the
       inlet hose or valve, and/or acoustic mesh or shroud on the mic
+- [ ] **Nov 20 visit: quick cycles.** Run every washer on its quick cycle with recording on (`/test/live`), noting
+      start times. Check whether its lower first-fill peak can be caught by lowering the first-fill threshold
+      without the neighbouring washers' fills or noise triggering it. If it can't, keep the current threshold:
+      quick cycles will then show as ended early on the site, which is acceptable
 
 ### 5. Before leaving the room
 

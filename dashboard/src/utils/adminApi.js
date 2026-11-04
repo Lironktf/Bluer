@@ -11,6 +11,10 @@ export function setAdminPassword(password) {
   else sessionStorage.removeItem(STORAGE_KEY);
 }
 
+export function diagnosticsUrl(query) {
+  return `${API_BASE_URL}/api/diagnostics?${query}`;
+}
+
 /** Returns { ok, status, data }. A 401 forgets the stored password so the gate shows again. */
 export async function adminFetch(query, { method = 'GET', body } = {}) {
   let response;

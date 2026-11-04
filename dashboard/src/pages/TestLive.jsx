@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { usePolling } from '../hooks/usePolling';
-import { adminFetch, formatAgo, nodeLabel } from '../utils/adminApi';
+import { adminFetch, diagnosticsUrl, formatAgo, nodeLabel } from '../utils/adminApi';
 import styles from './TestAdmin.module.css';
 
 const POLL_INTERVAL_MS = 15000;
@@ -13,6 +13,7 @@ const CHART_MS = 2.5 * 60000;
 const DRYER_Y_CAP = 15;
 const WASHER_Y_CAP = 150000;
 const DOOR_Y_CAP = 1000000;
+const RECORDING_POLL_MS = 60000;
 
 // Nodes always send their readings, one sample per 5 s, inside every report. Dryer and washer
 // samples are separate, each with its own time:
@@ -172,6 +173,70 @@ function Chart({ title, samples: allSamples, series, thresholds: allThresholds, 
   );
 }
 
+// While on (a day at most), the server keeps every 5 s reading from this pair; each recording
+// can be downloaded for 3 days after it ends, then the server deletes it.
+function Recording({ nodeId }) {
+  const [list, setList] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    const { ok, data } = await adminFetch(`kind=recordings&nodeId=${encodeURIComponent(nodeId)}`);
+    if (ok) setList(data.recordings || []);
+  }, [nodeId]);
+
+  useEffect(() => {
+    setList(null);
+    setError(null);
+  }, [nodeId]);
+
+  usePolling(load, RECORDING_POLL_MS);
+
+  const active = list?.find((r) => !r.stoppedAt);
+
+  const toggle = async () => {
+    setBusy(true);
+    const { ok, data } = await adminFetch('kind=recording', {
+      method: 'POST',
+      body: { nodeId, action: active ? 'stop' : 'start' },
+    });
+    setError(ok ? null : data?.error || 'Could not change the recording');
+    await load();
+    setBusy(false);
+  };
+
+  const when = (iso) => new Date(iso).toLocaleString();
+
+  return (
+    <div className={styles.recording}>
+      <div className={styles.recordingBar}>
+        {active ? (
+          <span className={styles.pending}>
+            Recording since {when(active.startedAt)}, stops by itself at {when(active.stopsAt)}
+          </span>
+        ) : (
+          <span className={styles.muted}>Not recording. A recording lasts a day at most.</span>
+        )}
+        <button type="button" className={active ? undefined : styles.primary} onClick={toggle} disabled={busy || !list}>
+          {active ? 'Stop recording' : 'Start recording'}
+        </button>
+        {error && <span className={styles.error}>{error}</span>}
+      </div>
+      {list?.length > 0 && (
+        <ul className={styles.recordingList}>
+          {list.map((r) => (
+            <li key={r.id}>
+              {when(r.startedAt)} – {r.stoppedAt ? when(r.stoppedAt) : 'now'}
+              <a href={diagnosticsUrl(`kind=recordingCsv&id=${r.id}`)}>Download CSV</a>
+              {r.expireAt && <span className={styles.muted}> · deleted {when(r.expireAt)}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function Live({ lock }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const nodeId = searchParams.get('node') || '';
@@ -254,6 +319,7 @@ function Live({ lock }) {
       </div>
 
       {!nodeId && <p className={styles.muted}>Choose a node.</p>}
+      {nodeId && <Recording nodeId={nodeId} />}
       {error && <p className={styles.error}>Could not load: {error}</p>}
 
       {nodeId && data && (

@@ -126,6 +126,38 @@ function SensorCells({ m, label }) {
   );
 }
 
+// TEMPORARY: confirms the NODE_ADMIN_PASSWORD set on Vercel accepts what you type. Remove after checking.
+function PasswordCheck() {
+  const [password, setPassword] = useState('');
+  const [result, setResult] = useState(null);
+
+  const check = async (e) => {
+    e.preventDefault();
+    setResult({ text: 'Checking…' });
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/diagnostics?kind=auth`, {
+        headers: { 'X-Admin-Password': password },
+      });
+      const data = await response.json().catch(() => null);
+      if (response.ok) setResult({ ok: true, text: '✓ Password is right' });
+      else setResult({ ok: false, text: `✗ ${data?.error || `HTTP ${response.status}`}` });
+    } catch {
+      setResult({ ok: false, text: '✗ Could not reach the server' });
+    }
+  };
+
+  return (
+    <form className={styles.passwordCheck} onSubmit={check}>
+      <label>
+        Check NODE_ADMIN_PASSWORD (set on Vercel):{' '}
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" />
+      </label>
+      <button type="submit" disabled={!password}>Check if password is right</button>
+      {result && <span className={result.ok ? styles.passOk : result.ok === false ? styles.bad : undefined}>{result.text}</span>}
+    </form>
+  );
+}
+
 export default function TestMachines() {
   const [machines, setMachines] = useState({});
   const [fetchedAt, setFetchedAt] = useState(null);
@@ -162,6 +194,8 @@ export default function TestMachines() {
         <Link to="/test/history">Firmware trial log</Link> · <Link to="/test/nodes">Node settings</Link> ·{' '}
         <Link to="/test/live">Live readings</Link>
       </p>
+
+      <PasswordCheck />
 
       {ids.length === 0 && nodeList.length === 0 && <p className={styles.empty}>No machines reporting.</p>}
 

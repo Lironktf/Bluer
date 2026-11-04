@@ -4,8 +4,12 @@
 //  - GET  ?kind=nodes        every node's thresholds and history
 //  - PUT  ?kind=config       save a node's thresholds
 //  - GET  ?kind=telemetry    5 s readings for /test/live (nodes send them inside their reports to machines.js)
+//  - GET  ?kind=recordings   a node's recordings, newest first
+//  - POST ?kind=recording    { nodeId, action: 'start' | 'stop' }
+//  - GET  ?kind=recordingCsv a recording's 5 s readings as a CSV file
 // Kept in this one file on purpose: every file under api/ is a separate Vercel function.
 import crypto from 'crypto';
+import { ObjectId } from 'mongodb';
 import { getCollection } from './lib/mongodb.js';
 
 const DEFAULT_LIMIT = 2000;
@@ -55,6 +59,10 @@ export const REPORT_EVERY_S = 30;
 const MAX_READINGS = 120;
 const MAX_READING_AGE_MS = 15 * 60 * 1000;
 const TELEMETRY_TTL_SECONDS = 3 * 24 * 60 * 60;
+const RECORDING_MAX_MS = 24 * 60 * 60 * 1000;  // a recording stops by itself after a day
+const RECORDING_KEEP_MS = 3 * 24 * 60 * 60 * 1000;  // then it can be downloaded for 3 days, and is deleted
+// A day of readings is ~35,000 rows; this keeps a CSV under Vercel's 4.5 MB response limit.
+const MAX_CSV_ROWS = 60000;
 
 const NODE_ID_PATTERN = /^[A-Za-z]+-\d{1,3}$/;
 
@@ -278,11 +286,149 @@ export async function storeReadings(nodeId, body, receivedAt) {
   const telemetry = await getCollection('nodeTelemetry');
   await ensureTelemetryIndexes(telemetry);
   const doc = { nodeId, ts: new Date(Math.max(...d.map((r) => r[0]), ...w.map((r) => r[0]))), d, w };
-  if (Number.isInteger(body.boot) && Number.isInteger(body.batch)) {
-    await telemetry.replaceOne({ _id: `${nodeId}:${body.boot}:${body.batch}` }, doc, { upsert: true });
-  } else {
-    await telemetry.insertOne(doc);
+  const batchId = Number.isInteger(body.boot) && Number.isInteger(body.batch) ? `${nodeId}:${body.boot}:${body.batch}` : null;
+  const { recordings, readings } = await recordingCollections();
+  let active = await recordings.findOne({ nodeId, stoppedAt: null }, { projection: { startedAt: 1, expireAt: 1 } });
+  if (active && receivedAt - active.startedAt.getTime() >= RECORDING_MAX_MS) {
+    await endOverdueRecordings(recordings, nodeId);
+    active = null;
   }
+
+  const writes = [
+    batchId ? telemetry.replaceOne({ _id: batchId }, { ...doc }, { upsert: true }) : telemetry.insertOne({ ...doc }),
+  ];
+  // A recording keeps its own copy, deleted with the recording rather than after 3 days.
+  if (active) {
+    const copy = { ...doc, recordingId: active._id, expireAt: active.expireAt };
+    writes.push(batchId
+      ? readings.replaceOne({ _id: `${active._id}:${batchId}` }, copy, { upsert: true })
+      : readings.insertOne(copy));
+  }
+  await Promise.all(writes);
+}
+
+let recordingIndexes = null;
+async function recordingCollections() {
+  const [recordings, readings] = await Promise.all([getCollection('recordings'), getCollection('recordingReadings')]);
+  if (!recordingIndexes) {
+    recordingIndexes = Promise.all([
+      recordings.createIndex({ nodeId: 1, stoppedAt: 1 }, { name: 'nodeId_stoppedAt' }),
+      recordings.createIndex({ expireAt: 1 }, { expireAfterSeconds: 0, name: 'expireAt_ttl' }),
+      readings.createIndex({ recordingId: 1, ts: 1 }, { name: 'recordingId_ts' }),
+      readings.createIndex({ expireAt: 1 }, { expireAfterSeconds: 0, name: 'expireAt_ttl' }),
+    ]).catch((error) => {
+      recordingIndexes = null;
+      throw error;
+    });
+  }
+  await recordingIndexes;
+  return { recordings, readings };
+}
+
+// A recording past its day ends at exactly startedAt + 1 day; its expireAt was set for that at the start.
+function endOverdueRecordings(recordings, nodeId) {
+  return recordings.updateMany(
+    { nodeId, stoppedAt: null, startedAt: { $lte: new Date(Date.now() - RECORDING_MAX_MS) } },
+    [{ $set: { stoppedAt: { $add: ['$startedAt', RECORDING_MAX_MS] } } }]
+  );
+}
+
+const recordingJson = (r) => ({
+  id: String(r._id),
+  nodeId: r.nodeId,
+  startedAt: r.startedAt,
+  stoppedAt: r.stoppedAt,
+  stopsAt: new Date(r.startedAt.getTime() + RECORDING_MAX_MS),
+  expireAt: r.expireAt,
+});
+
+async function listRecordings(req, res) {
+  const { nodeId } = req.query;
+  if (typeof nodeId !== 'string' || !NODE_ID_PATTERN.test(nodeId)) {
+    return res.status(400).json({ success: false, error: 'Invalid nodeId' });
+  }
+  const { recordings } = await recordingCollections();
+  await endOverdueRecordings(recordings, nodeId);
+  // Hidden as soon as it expires; the TTL sweep deletes it within about a minute.
+  const docs = await recordings
+    .find({ nodeId, $or: [{ expireAt: { $gt: new Date() } }, { expireAt: { $exists: false } }] })
+    .sort({ startedAt: -1 })
+    .limit(20)
+    .toArray();
+  return res.status(200).json({ success: true, nodeId, recordings: docs.map(recordingJson) });
+}
+
+async function setRecording(req, res) {
+  const { nodeId, action } = req.body || {};
+  if (typeof nodeId !== 'string' || !NODE_ID_PATTERN.test(nodeId)) {
+    return res.status(400).json({ success: false, error: 'Invalid nodeId' });
+  }
+  const { recordings, readings } = await recordingCollections();
+  await endOverdueRecordings(recordings, nodeId);
+  const now = new Date();
+  if (action === 'start') {
+    // Starting while one is already running keeps the running one.
+    await recordings.updateOne(
+      { nodeId, stoppedAt: null },
+      { $setOnInsert: { startedAt: now, expireAt: new Date(now.getTime() + RECORDING_MAX_MS + RECORDING_KEEP_MS) } },
+      { upsert: true }
+    );
+  } else if (action === 'stop') {
+    const expireAt = new Date(now.getTime() + RECORDING_KEEP_MS);
+    const stopping = await recordings.find({ nodeId, stoppedAt: null }, { projection: { _id: 1 } }).toArray();
+    const ids = stopping.map((r) => r._id);
+    await Promise.all([
+      recordings.updateMany({ _id: { $in: ids } }, { $set: { stoppedAt: now, expireAt } }),
+      readings.updateMany({ recordingId: { $in: ids } }, { $set: { expireAt } }),
+    ]);
+  } else {
+    return res.status(400).json({ success: false, error: 'action must be start or stop' });
+  }
+  return res.status(200).json({ success: true });
+}
+
+// Columns match Arduino/tools/snapshot_recording.py. Dryer and washer rows each have their own time.
+async function recordingCsv(req, res) {
+  const { id } = req.query;
+  if (typeof id !== 'string' || !ObjectId.isValid(id)) {
+    return res.status(400).json({ success: false, error: 'Invalid recording id' });
+  }
+  const { recordings, readings } = await recordingCollections();
+  const rec = await recordings.findOne({ _id: new ObjectId(id) });
+  // The TTL sweep runs about once a minute, so an expired recording can briefly still exist.
+  if (!rec || (rec.expireAt && rec.expireAt.getTime() <= Date.now())) {
+    return res.status(404).json({ success: false, error: 'Recording not found or already deleted' });
+  }
+
+  const from = rec.startedAt.getTime();
+  const to = rec.stoppedAt ? rec.stoppedAt.getTime() : Math.min(Date.now(), from + RECORDING_MAX_MS);
+  // A batch is stamped with its newest reading, and its oldest can be up to MAX_READING_AGE_MS earlier.
+  const docs = await readings
+    .find({ recordingId: rec._id, ts: { $gte: new Date(from), $lte: new Date(to + MAX_READING_AGE_MS) } }, { projection: { d: 1, w: 1 } })
+    .toArray();
+
+  const rows = [];
+  for (const doc of docs) {
+    for (const [t, avg, jump, run, emp] of doc.d || []) {
+      if (t >= from && t <= to) rows.push([t, `dryer,${avg},${jump},,,,${run},${emp}`]);
+    }
+    for (const [t, w1, w2, drop, run, emp] of doc.w || []) {
+      if (t >= from && t <= to) rows.push([t, `washer,,,${w1},${w2},${drop},${run},${emp}`]);
+    }
+  }
+  if (rows.length > MAX_CSV_ROWS) {
+    return res.status(413).json({ success: false, error: 'Too many readings for one file' });
+  }
+  rows.sort((a, b) => a[0] - b[0]);
+
+  const csv = ['time,machine,avg10,door_jump,water1,water2,door_drop,running,empty']
+    .concat(rows.map(([t, rest]) => `${new Date(t).toISOString()},${rest}`))
+    .join('\n');
+  const stamp = new Date(from).toISOString().slice(0, 16).replace(/[:T]/g, '-');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${rec.nodeId}_${stamp}.csv"`);
+  res.setHeader('Cache-Control', 'no-store');
+  return res.status(200).send(`${csv}\n`);
 }
 
 async function readTelemetry(req, res) {
@@ -386,6 +532,9 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && kind === 'nodes') return await listNodes(res);
     if (req.method === 'PUT' && kind === 'config') return await saveConfig(req, res);
     if (req.method === 'GET' && kind === 'telemetry') return await readTelemetry(req, res);
+    if (req.method === 'GET' && kind === 'recordings') return await listRecordings(req, res);
+    if (req.method === 'POST' && kind === 'recording') return await setRecording(req, res);
+    if (req.method === 'GET' && kind === 'recordingCsv') return await recordingCsv(req, res);
 
     return res.status(405).json({ success: false, error: 'Method not allowed' });
   } catch (error) {
