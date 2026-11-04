@@ -67,8 +67,6 @@ const unsigned long WIFI_HARD_RESET_MS = 180000UL;  // offline this long -> full
 bool wifiIsDown = false;
 unsigned long wifiDownSince = 0;
 volatile bool wifiReinitRequested = false;  // set after repeated failed reports, serviced by the network task
-volatile bool wifiEverConnected = false;
-volatile uint8_t loginRejects = 0;  // login refusals since the last successful join
 
 // ---------------- Reliability supervision ----------------
 // Everything below exists so the node can never end up in a state that only a physical power cycle can clear.
@@ -296,24 +294,13 @@ void queueWasherRound(uint8_t counter, unsigned long t, const uint8_t* p, bool i
   washerRoundSeen = true;
 }
 
-// Every nearby advert passes through here, so read the raw packet rather than
-// getManufacturerData(), which heap-allocates a copy per packet and fragments memory.
-static const uint8_t* findLinkData(const std::vector<uint8_t>& p) {
-  for (size_t i = 0; i + 1 < p.size();) {
-    uint8_t len = p[i];
-    if (len == 0 || i + 1 + len > p.size()) return nullptr;
-    if (p[i + 1] == 0xFF && len - 1 >= LINK_LEN) return &p[i + 2];
-    i += 1 + len;
-  }
-  return nullptr;
-}
-
 class MyAdvertisedDeviceCallbacks : public NimBLEScanCallbacks {
   void onResult(const NimBLEAdvertisedDevice* advertisedDevice) override {
-    const uint8_t* b = findLinkData(advertisedDevice->getPayload());
-    if (!b) {
+    std::string data = advertisedDevice->getManufacturerData();
+    if (data.size() < LINK_LEN) {
       return;
     }
+    const uint8_t* b = (const uint8_t*)data.data();
     if (b[0] != 0xFF || b[1] != 0xFF || b[2] != 'B' || b[3] != 'W' || b[4] != pairNumber) {
       return;
     }
@@ -349,8 +336,6 @@ void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
       break;
 
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
-      wifiEverConnected = true;
-      loginRejects = 0;
       Serial.println();
       Serial.println("========================================");
       Serial.println("[WIFI] WiFi connected to eduroam!");
@@ -367,10 +352,6 @@ void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
       Serial.printf("[WIFI] Disconnected. Reason code: %u (heap=%u maxAlloc=%u)\n",
                     info.wifi_sta_disconnected.reason, (unsigned)ESP.getFreeHeap(),
                     (unsigned)ESP.getMaxAllocHeap());
-      if (info.wifi_sta_disconnected.reason == WIFI_REASON_802_1X_AUTH_FAILED
-          || info.wifi_sta_disconnected.reason == WIFI_REASON_AUTH_FAIL) {
-        loginRejects++;
-      }
       break;
 
     default:
@@ -451,12 +432,6 @@ void maintainWiFiConnection() {
     wifiIsDown = false;
     wifiBackoffMs = 15000;
     return;
-  }
-
-  // The same credentials already worked this boot, so repeated refusals mean the login ran short
-  // of memory; a reboot clears it. Never before the first join, so a bad password can't loop.
-  if (wifiEverConnected && loginRejects >= 3) {
-    hardRestart("WiFi login keeps being refused after a working session");
   }
 
   if (!wifiIsDown) {  // a flag, not a millis()==0 sentinel

@@ -52,8 +52,12 @@ firmware uses a different BLE format. Use these main sketches, not the nested `*
 |---|---|---|
 | Board | **ESP32 Dev Module** | **ESP32 Dev Module** |
 | Partition Scheme | **Minimal SPIFFS (1.9MB APP with OTA)** | **Default** |
+| Flash Mode | **QIO** | **QIO** |
+| Flash Frequency | **80MHz** | **80MHz** |
 | Port | Attached dryer's port | Attached washer's port |
 
+- [ ] Keep Flash Mode **QIO** and Flash Frequency **80MHz**. DIO / 40MHz made the dryer's eduroam login fail
+  over and over (disconnect reason codes 23 and 202), even though the same board worked on home WiFi
 - [ ] The dryer does not fit the default app partition. The OTA partition reserves space only; it does not
   mean remote firmware updates are implemented
 - [ ] Leave other board options at the board defaults unless the actual hardware requires otherwise;
