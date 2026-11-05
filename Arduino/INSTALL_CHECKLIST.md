@@ -52,15 +52,15 @@ firmware uses a different BLE format. Use these main sketches, not the nested `*
 |---|---|---|
 | Board | **ESP32 Dev Module** | **ESP32 Dev Module** |
 | Partition Scheme | **Minimal SPIFFS (1.9MB APP with OTA)** | **Default** |
-| Flash Mode | **QIO** | **QIO** |
-| Flash Frequency | **80MHz** | **80MHz** |
 | Port | Attached dryer's port | Attached washer's port |
 
-- [ ] Start with Flash Mode **QIO** and Flash Frequency **80MHz**. The day the dryer kept failing the eduroam
-  login (codes 4, 23, 202) these settings seemed to fix it, but another dryer then failed with the same
-  settings and code, so they may not have been the real fix. On site (Nov 20): confirm a board joins
-  eduroam and reports with these settings; if one keeps failing where another board works, power it off
-  for 15-30 min, retry, and if it still fails swap in a backup board
+- [ ] Flash Mode / Flash Frequency: leave at the board defaults. They only set how fast the chip reads its
+  own program and were not the eduroam fix. The partition scheme is the setting that matters
+- [ ] eduroam (codes 4, 23, 202): Dryer 2 joined, then dropped after ~2 h and its re-login kept failing.
+  The Nov 4 build frees ~14 KB of RAM (smaller upload batches and buffer, smaller task stacks) and pauses
+  BLE while joining; it ran 15+ h at SJU. On site (Nov 20): confirm each board joins and reports, and
+  through its first automatic restart. If one keeps failing where another works, power it off for
+  15-30 min, retry, then swap in a backup board
 - [ ] The dryer does not fit the default app partition. The OTA partition reserves space only; it does not
   mean remote firmware updates are implemented
 - [ ] Leave other board options at the board defaults unless the actual hardware requires otherwise;

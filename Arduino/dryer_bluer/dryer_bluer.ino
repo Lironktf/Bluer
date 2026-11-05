@@ -11,6 +11,8 @@
 #include <ArduinoJson.h>  // v7
 #include <Preferences.h>
 
+TaskHandle_t loopTaskH = NULL;  // for the stack headroom in the report log
+
 // Leave at 0 until you have confirmed a 200 with it set to 1: if the bundle is
 // unavailable every upload fails, which is worse than your original setInsecure().
 #define USE_TLS_CERT_BUNDLE 0
@@ -138,10 +140,10 @@ float
 
 // Machine identification and server configuration
 //VARIES: dryer ID; its trailing number selects the BLE pair.
-const char* machineId = "sj-d4";
+const char* machineId = "sj-d1";
 const char* serverUrl = "https://laun-dryer.vercel.app/api/machines";
 //VARIES: paired washer ID; use the same number as machineId.
-const char* washerMachineId = "sj-w4";
+const char* washerMachineId = "sj-w1";
 
 // Snapshot of the dryer state for the network task (loop() writes, core 0 reads).
 portMUX_TYPE dryerMux = portMUX_INITIALIZER_UNLOCKED;
@@ -186,7 +188,9 @@ const unsigned long RETRY_MIN_MS = 5000;
 const unsigned long RETRY_MAX_MS = 60000;
 const unsigned long WASHER_RECENT_MS = 60000;  // the washer's status is reported only while it is heard
 const int QUEUE_MAX = 120;  // 10 min of 5 s readings
-const int SEND_MAX = 60;    // per POST, so the JSON always fits reportJson
+// Per POST. 24 rows of each kind is ~2.7 KB of JSON at worst, so it always fits reportJson; a full
+// backlog drains in 5 POSTs. Kept small because RAM spent here is RAM the eduroam login can't use.
+const int SEND_MAX = 24;
 volatile unsigned long reportEveryMs = 30000;  // the server's reply can change this
 
 template <typename T>
@@ -248,7 +252,7 @@ uint32_t bootId = 0;   // with batchNo, lets the server replace a batch it alrea
 uint32_t batchNo = 0;  // advances only on success, so a retry reuses it
 DryerPeriod sendD[SEND_MAX];
 WasherRound sendW[SEND_MAX];
-char reportJson[8192];
+char reportJson[4096];
 size_t reportLen = 0;
 
 static void putU16(uint8_t* p, uint32_t v) {
@@ -368,8 +372,11 @@ void hardRestart(const char* why) {
 }
 
 void connectToEduroam() {
-  Serial.println("[WIFI] Configuring secure Waterloo eduroam connection...");
+  Serial.printf("[WIFI] Configuring secure Waterloo eduroam connection... (heap=%u maxAlloc=%u)\n",
+                (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+  // The radio is shared: no BLE while the EAP login runs. serviceBleScan() restarts both.
   pBLEScan->stop();
+  pAdvertising->stop();
 
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
@@ -562,6 +569,11 @@ void supervisorTask(void* parameter) {
   }
 }
 
+// loop() only samples the MPU now (uploads run in networkTask), so it doesn't need the 8 KB default.
+// Every byte left on the heap is room for the eduroam login. The success log prints the headroom.
+// Kept here, not at the top: it defines a function, and Arduino puts its prototypes before the first one.
+SET_LOOP_TASK_STACK_SIZE(4096);
+
 void setup() {
   Serial.begin(115200);
   delay(500);
@@ -577,6 +589,7 @@ void setup() {
   Serial.printf("   Reset reason: %d\n", esp_reset_reason());
   Serial.println("========================================\n");
 
+  loopTaskH = xTaskGetCurrentTaskHandle();  // setup() runs on the loop task
   pairNumber = pairFromMachineId(machineId);
   Serial.printf("[BLE] Pair %u: listening for washer %s\n", pairNumber, washerMachineId);
 
@@ -645,7 +658,9 @@ void setup() {
   periodStart = millis();
 
   // WiFi and uploads on core 0, so a slow HTTPS POST or a 30 s eduroam join never pauses the MPU.
-  xTaskCreatePinnedToCore(networkTask, "network", 12288, NULL, 1, NULL, 0);
+  // 8 KB is the stack the HTTPS uploads ran on before they moved out of loop(); the success log
+  // prints how much of it is left.
+  xTaskCreatePinnedToCore(networkTask, "network", 8192, NULL, 1, NULL, 0);
 }
 
 // "sj-d4" -> 4. The paired washer is flashed with the same PAIR_NUMBER.
@@ -771,12 +786,15 @@ void serviceDryerAdvert() {
 
 // Listening ~30% of the time: each washer packet carries two 5 s rounds, so every
 // round arrives while most of the airtime is left to eduroam. Paused while joining
-// so the EAP login gets the shared radio.
+// so the EAP login gets the shared radio. Advertising pauses too: the washer only needs it for
+// website thresholds, which can't arrive while Wi-Fi is down anyway.
 void serviceBleScan() {
   if (WiFi.status() != WL_CONNECTED) {
     if (pBLEScan->isScanning()) pBLEScan->stop();
+    if (pAdvertising->isAdvertising()) pAdvertising->stop();
     return;
   }
+  if (!pAdvertising->isAdvertising()) pAdvertising->start();
   if (!pBLEScan->isScanning()) {
     pBLEScan->start(0, false, true);  // 0 = until stopped
   }
@@ -942,9 +960,11 @@ bool sendReport(const ReportStatus& st) {
     return false;
   }
   applyServerReply(reply);
-  Serial.printf("✅ Report %d: d=%d w=%d dryer run=%d empty=%d, washer %s, heap=%u\n", code, nd, nw,
-                st.dRunning, st.dEmpty, st.wKnown ? (st.wRunning ? "running" : "idle") : "not heard",
-                (unsigned)ESP.getFreeHeap());
+  // stack free = the least each task has had spare since boot, in bytes
+  Serial.printf("✅ Report %d: d=%d w=%d dryer run=%d empty=%d, washer %s, heap=%u, stack free net=%u loop=%u\n",
+                code, nd, nw, st.dRunning, st.dEmpty,
+                st.wKnown ? (st.wRunning ? "running" : "idle") : "not heard", (unsigned)ESP.getFreeHeap(),
+                (unsigned)uxTaskGetStackHighWaterMark(NULL), (unsigned)uxTaskGetStackHighWaterMark(loopTaskH));
   return true;
 }
 
@@ -1188,9 +1208,9 @@ bool record_mpu_accel() {
 }
 
 void print_accels() {
-  Serial.print("Avg10:");
-  Serial.print(avg10);
-  Serial.print(",");
-  Serial.print("ActivitySmall:");
-  Serial.println(activitysmall);
+  // Serial.print("Avg10:");
+  // Serial.print(avg10);
+  // Serial.print(",");
+  // Serial.print("ActivitySmall:");
+  // Serial.println(activitysmall);
 }
