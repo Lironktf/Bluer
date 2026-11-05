@@ -421,8 +421,31 @@ async function recordingCsv(req, res) {
   }
   rows.sort((a, b) => a[0] - b[0]);
 
-  const csv = ['time,machine,avg10,door_jump,water1,water2,door_drop,running,empty']
-    .concat(rows.map(([t, rest]) => `${new Date(t).toISOString()},${rest}`))
+  // The thresholds saved for this node at each reading's time (the node picks a save up within a
+  // report). Written on the first row and whenever they change; blank rows mean "same as above".
+  const history = await (await getCollection('nodeConfigHistory'))
+    .find({ nodeId: rec.nodeId, changedAt: { $lte: new Date(to) } }, { projection: { thresholds: 1, changedAt: 1 } })
+    .sort({ changedAt: 1 })
+    .toArray();
+  let next = 0;
+  let current = defaultThresholds(rec.nodeId);
+  let written = null;
+  const lines = rows.map(([t, rest]) => {
+    while (next < history.length && history[next].changedAt.getTime() <= t) {
+      current = effectiveThresholds(rec.nodeId, history[next++]);
+    }
+    let thresholdCols = ',,,,,';
+    if (current !== written) {
+      written = current;
+      thresholdCols = [current.dryerOnThreshold, current.dryerDoorChange, current.washerFirstFill,
+        current.washerRefill, current.washerRefillBands, current.washerDoorDrop].join(',');
+    }
+    return `${new Date(t).toISOString()},${rest},${thresholdCols}`;
+  });
+
+  const csv = ['time,machine,avg10,door_jump,water1,water2,door_drop,running,empty,'
+    + 'dryer_on,dryer_door,first_fill,refill,refill_bands,washer_door']
+    .concat(lines)
     .join('\n');
   const stamp = new Date(from).toISOString().slice(0, 16).replace(/[:T]/g, '-');
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
