@@ -8,12 +8,16 @@ On /test/live choose the pair, press Start recording, run your tests, then Downl
     python3 snapshot_recording.py sj-4_2026-11-04-14-03.csv
     python3 snapshot_recording.py day1.csv day2.csv --out my_test
 
-Quiet stretches are skipped: washer bands both under 10,000, washer door drop under 700,000,
-dryer avg10 under 2.2 and dryer door jump under 2. Everything else becomes a PNG:
-  washer  ~20 s around every burst of water (first fill, refills, a neighbour) or door drop.
-          The last water-in before the washer stops running says when it stopped.
-  dryer   the first 2 min of each cycle and its end; the middle only where avg10 dips out of it.
-          Door jumps count only outside a cycle, since a running drum shakes the door too.
+Quiet stretches are skipped. Everything else becomes a PNG:
+  washer  ~20 s around every burst of water over 10,000 (first fill, refills, a neighbour) or door
+          drop over 700,000. Both sit below the node's thresholds on purpose, so near misses show.
+          The last water-in before the washer stops running says when it stopped. Of a run of
+          neighbour-only bursts (water while idle, no door), only the loudest is saved.
+  dryer   a cycle is avg10 above the node's dryer-on threshold at that moment. Dips under it stay
+          in the same cycle unless avg10 falls below 1.5 for over a minute. The first 2 min and the
+          end are shown; the start snapshot gives the cycle's lowest avg10 and how often it dipped.
+          Door jumps above the node's door threshold count only outside a cycle, since a running
+          drum shakes the door too.
 A dryer door bump and a washer door bump close together are tagged as possibly the same bump,
 felt by both sensors of the pair. Graphs draw the thresholds the node had at that moment.
 Times are in this computer's local time, to match your notes. Reads files only: it never
@@ -36,6 +40,7 @@ import matplotlib.pyplot as plt
 # Quiet cutoffs: a stretch below all four is never graphed.
 WASHER_WATER = 10_000
 WASHER_DOOR = 700_000
+# The dryer uses the node's own thresholds; these apply only to a CSV downloaded before they were included.
 DRYER_ON = 2.2
 DRYER_DOOR = 2.0
 
@@ -43,12 +48,15 @@ PERIOD = timedelta(seconds=5)  # each reading is the highest value of the 5 s en
 MIN_SNAPSHOT = timedelta(seconds=20)
 WASHER_PAD = timedelta(seconds=10)
 WASHER_GAP = timedelta(seconds=15)  # bursts closer than this are one snapshot
-CYCLE_GAP = timedelta(seconds=60)  # avg10 dips shorter than this stay inside the cycle
+START_BEFORE = timedelta(seconds=30)  # shown before a first fill
+IDLE_SPAN = timedelta(minutes=1)  # a long neighbour stretch is shown as this much either side of its loudest reading
+CYCLE_GAP = timedelta(seconds=60)  # any dip shorter than this stays inside the cycle
+DIP_FLOOR = 1.5  # a longer dip stays inside it too, as long as avg10 never falls below this...
+DIP_MAX = timedelta(minutes=10)  # ...for no longer than this
 CYCLE_BEFORE = timedelta(seconds=30)
 CYCLE_START = timedelta(minutes=2)
 CYCLE_END = timedelta(minutes=2)
 CYCLE_AFTER = timedelta(seconds=60)
-DIP_PAD = timedelta(seconds=30)
 DOOR_PAD = timedelta(seconds=20)
 # A washer door bump this close to a dryer door bump may be the same one; the washer's readings
 # reach the website up to ~15 s behind the dryer's.
@@ -56,13 +64,15 @@ MATCH_BEFORE = timedelta(seconds=20)
 MATCH_AFTER = timedelta(seconds=35)
 MATCH_NOTE = "could be activity from matching node"
 SHORT_CYCLE = "cycle (possible just door opened triggering a cycle)"
+IDLE_WATER = "water while idle (neighbour?)"
+IDLE_RUN_GAP = timedelta(minutes=10)  # neighbour bursts closer than this count as one run
 
 THRESHOLDS = ["dryer_on", "dryer_door", "first_fill", "refill", "refill_bands", "washer_door"]
 BAND_NAMES = {1: "lower band", 2: "either band", 3: "upper band"}
 
 Dryer = namedtuple("Dryer", "t avg10 door running empty")
 Washer = namedtuple("Washer", "t w1 w2 drop running empty")
-Window = namedtuple("Window", "start end label event")  # event: the first reading that caused it
+Window = namedtuple("Window", "start end label event note", defaults=("",))  # event: the first reading that caused it
 
 
 def load(paths):
@@ -121,7 +131,8 @@ def merge(windows):
                 label = last.label
             else:
                 label = f"{last.label} + {w.label}" if last.label else w.label
-            merged.append(Window(last.start, max(last.end, w.end), label, min(last.event, w.event)))
+            note = "\n".join(n for n in (last.note, w.note) if n)
+            merged.append(Window(last.start, max(last.end, w.end), label, min(last.event, w.event), note))
         else:
             merged.append(w)
     return merged
@@ -163,10 +174,31 @@ def washer_label(rows):
 
 
 def washer_windows(washer):
-    loud = [r.t for r in washer if max(r.w1, r.w2) >= WASHER_WATER or r.drop >= WASHER_DOOR]
+    # Water bursts are chained, but never across a start: a neighbour's water can sit above the
+    # cutoff for half an hour and would otherwise glue itself to this washer's first fill.
+    groups = []  # (rows, starts_cycle)
+    for prev, r in zip([None] + washer[:-1], washer):
+        if max(r.w1, r.w2) < WASHER_WATER:
+            continue
+        starts = prev is not None and not prev.running and r.running
+        if groups and not starts and r.t - groups[-1][0][-1].t <= WASHER_GAP:
+            groups[-1][0].append(r)
+        else:
+            groups.append(([r], starts))
+
     windows = []
-    for first, last in group(loud, WASHER_GAP):
-        start, end = widen(first - PERIOD - WASHER_PAD, last + WASHER_PAD)
+    for rows, starts in groups:
+        first, last = rows[0].t, rows[-1].t
+        start, end = first - PERIOD - (START_BEFORE if starts else WASHER_PAD), last + WASHER_PAD
+        if not any(r.running for r in rows) and last - first > 2 * IDLE_SPAN:
+            first = max(rows, key=lambda r: max(r.w1, r.w2)).t
+            start, end = first - IDLE_SPAN, first + IDLE_SPAN
+        start, end = widen(start, end)
+        windows.append(Window(start, end, "", first))
+
+    doors = [r.t for r in washer if r.drop >= WASHER_DOOR]
+    for first, last in group(doors, PERIOD * 2):
+        start, end = widen(first - PERIOD - DOOR_PAD, last + DOOR_PAD)
         windows.append(Window(start, end, "", first))
     return [w._replace(label=washer_label(rows_in(washer, w))) for w in merge(windows)]
 
@@ -180,59 +212,125 @@ def refill_hit(r, th):
 
 
 def end_notes(washer, windows, thresholds):
-    """For each time the washer stopped running: a note on the last water-in snapshot before it."""
-    notes = {}
+    """For each time the washer stopped running: a note on that cycle's last snapshot where the water
+    was above the refill threshold the washer was following, i.e. the last water-in that reset its timer."""
+    windows = list(windows)
     wet = [i for i, w in enumerate(windows) if "water" in w.label or "first fill" in w.label]
+    previous_end = None
     for prev, r in zip(washer, washer[1:]):
         if not prev.running or r.running:
             continue
-        before = [i for i in wet if windows[i].event < r.t]
-        if not before:
-            continue
-        i = before[-1]
-        rows = rows_in(washer, windows[i])
-        th = thresholds.at(windows[i].event)
-        above = [k for k, row in enumerate(rows) if refill_hit(row, th)]
-        if above:
+        in_cycle = [i for i in wet if windows[i].event < r.t and (previous_end is None or windows[i].event > previous_end)]
+        previous_end = r.t
+        for i in reversed(in_cycle):
+            rows = rows_in(washer, windows[i])
+            above = [k for k, row in enumerate(rows) if refill_hit(row, thresholds.at(row.t))]
+            if not above:
+                continue
+            k = above[-1]
+            th = thresholds.at(rows[k].t)
+            # Without thresholds in the CSV, refill_hit falls back to the quiet cutoff.
             level = f"refill threshold ({th['refill']:,.0f})" if "refill" in th else f"quiet cutoff ({WASHER_WATER:,})"
+            dipped = rows[k + 1].t if k + 1 < len(rows) else rows[k].t + PERIOD
+            windows[i] = windows[i]._replace(note=(
+                f"This is last water in, washer ended at {r.t:%H:%M:%S} (running went false), "
+                f"{duration(r.t - dipped)} after the water dropped below the {level} at {dipped:%H:%M:%S}"))
+            break
+    return windows
+
+
+def keep_loudest_idle(washer, windows):
+    """Of back-to-back neighbour-only snapshots, keeps only the loudest; door ones are always kept."""
+    out, run = [], []
+
+    def flush():
+        if not run:
+            return
+        best = max(run, key=lambda w: max(max(r.w1, r.w2) for r in rows_in(washer, w)))
+        if len(run) > 1:
+            best = best._replace(note=f"Loudest of {len(run)} neighbour bursts from {run[0].start:%H:%M:%S} "
+                                      f"to {run[-1].end:%H:%M:%S}; the others are not saved")
+        out.append(best)
+        run.clear()
+
+    for w in windows:
+        if run and (w.label != IDLE_WATER or w.start - run[-1].end > IDLE_RUN_GAP):
+            flush()
+        if w.label == IDLE_WATER:
+            run.append(w)
         else:
-            above = [k for k, row in enumerate(rows) if max(row.w1, row.w2) >= WASHER_WATER]
-            level = f"quiet cutoff ({WASHER_WATER:,})"
-        k = above[-1]
-        dipped = rows[k + 1].t if k + 1 < len(rows) else rows[k].t + PERIOD
-        notes[i] = (f"This is last water in, washer ended at {r.t:%H:%M:%S} (running went false), "
-                    f"{duration(r.t - dipped)} after the water dropped below the {level} at {dipped:%H:%M:%S}")
-    return notes
+            out.append(w)
+    flush()
+    return out
 
 
-def dryer_windows(dryer):
+def dryer_on(thresholds, t):
+    return thresholds.at(t).get("dryer_on", DRYER_ON)
+
+
+def dryer_door(thresholds, t):
+    return thresholds.at(t).get("dryer_door", DRYER_DOOR)
+
+
+def dryer_cycles(dryer, thresholds):
+    """[first, last] reading above the dryer-on threshold, joined across dips (see CYCLE_GAP, DIP_FLOOR)."""
+    cycles, low = [], None  # low: the lowest avg10 since the last reading above the threshold
+    for r in dryer:
+        if r.avg10 > dryer_on(thresholds, r.t):
+            gap = r.t - cycles[-1][1] if cycles else None
+            if cycles and (gap <= CYCLE_GAP or ((low is None or low >= DIP_FLOOR) and gap <= DIP_MAX)):
+                cycles[-1][1] = r.t
+            else:
+                cycles.append([r.t, r.t])
+            low = None
+        elif cycles:
+            low = r.avg10 if low is None else min(low, r.avg10)
+    return cycles
+
+
+def cycle_note(dryer, thresholds, first, last):
+    """How many times avg10 dipped under the threshold inside the cycle, and the note for its start."""
+    inside = [r for r in dryer if first <= r.t <= last]
+    above = [r.avg10 > dryer_on(thresholds, r.t) for r in inside]
+    dips = sum(1 for a, b in zip(above, above[1:]) if a and not b)
+    low = min(inside, key=lambda r: r.avg10)
+    times = f"{dips} time{'' if dips == 1 else 's'}"
+    note = (f"Lowest avg10 in this {duration(last - first + PERIOD)} cycle: {low.avg10:.3f} at {low.t:%H:%M:%S} "
+            f"(dryer on {dryer_on(thresholds, low.t):g}); " + (f"dipped below it {times}" if dips else "never dipped below it"))
+    return dips, times, note
+
+
+def dryer_windows(dryer, thresholds):
     windows, busy = [], []
-    for first, last in group([r.t for r in dryer if r.avg10 >= DRYER_ON], CYCLE_GAP):
+    for first, last in dryer_cycles(dryer, thresholds):
         start = first - PERIOD
         busy.append((start - CYCLE_BEFORE, last + CYCLE_AFTER))
+        dips, times, note = cycle_note(dryer, thresholds, first, last)
         if last - start <= CYCLE_START + CYCLE_END:
-            windows.append(Window(start - CYCLE_BEFORE, last + CYCLE_AFTER, SHORT_CYCLE, first))
+            windows.append(Window(start - CYCLE_BEFORE, last + CYCLE_AFTER, SHORT_CYCLE, first, note))
             continue
-        windows.append(Window(start - CYCLE_BEFORE, start + CYCLE_START, "cycle start", first))
+        label = f"cycle start (dipped below threshold {times} during cycle)" if dips else "cycle start"
+        # Loading usually opens the door right before the cycle starts; it is on this snapshot.
+        if any(r.door > dryer_door(thresholds, r.t) for r in dryer if start - CYCLE_BEFORE <= r.t <= first):
+            label += " + door"
+        windows.append(Window(start - CYCLE_BEFORE, start + CYCLE_START, label, first, note))
         windows.append(Window(last - CYCLE_END, last + CYCLE_AFTER, "cycle end", last))
-        middle = [r.t for r in dryer if start + CYCLE_START < r.t < last - CYCLE_END and r.avg10 < DRYER_ON]
-        for d_first, d_last in group(middle, PERIOD * 2):
-            windows.append(Window(d_first - PERIOD - DIP_PAD, d_last + DIP_PAD, "mid-cycle dip", d_first))
 
     # Inside a cycle or its snapshots the door jump is the drum shaking, or already on screen.
-    doors = [r.t for r in dryer if r.door >= DRYER_DOOR and not any(s <= r.t <= e for s, e in busy)]
+    doors = [r.t for r in dryer
+             if r.door > dryer_door(thresholds, r.t) and not any(s <= r.t <= e for s, e in busy)]
     for first, last in group(doors, PERIOD * 2):
         start, end = widen(first - PERIOD - DOOR_PAD, last + DOOR_PAD)
         windows.append(Window(start, end, "door", first))
     return merge(windows)
 
 
-def tag_matches(dryer, washer, dryer_ws, washer_ws):
+def tag_matches(dryer, washer, dryer_ws, washer_ws, thresholds):
     """Tags dryer and washer door bumps close enough to be one bump felt by both sensors."""
     def bumps(ws, rows, hit):
         return {i: first_time(rows_in(rows, w), hit, w.event) for i, w in enumerate(ws) if "door" in w.label}
 
-    d_bumps = bumps(dryer_ws, dryer, lambda r: r.door >= DRYER_DOOR)
+    d_bumps = bumps(dryer_ws, dryer, lambda r: r.door > dryer_door(thresholds, r.t))
     w_bumps = bumps(washer_ws, washer, lambda r: r.drop >= WASHER_DOOR)
     d_hits = {i for i, dt in d_bumps.items() if any(-MATCH_BEFORE <= wt - dt <= MATCH_AFTER for wt in w_bumps.values())}
     w_hits = {j for j, wt in w_bumps.items() if any(-MATCH_BEFORE <= wt - dt <= MATCH_AFTER for dt in d_bumps.values())}
@@ -263,10 +361,10 @@ def finish(ax, ylabel, tz):
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S", tz=tz))
 
 
-def title(machine, w, th, note):
+def title(machine, w, th):
     lines = [f"{machine}: {w.label}   {day(w.start)} {w.start:%H:%M:%S} to {w.end:%H:%M:%S}   (yellow = running)"]
-    if note:
-        lines.append(note)
+    if w.note:
+        lines.append(w.note)
     if not th:
         lines.append("No thresholds in this CSV: download it again from /test/live to see them")
     return "\n".join(lines)
@@ -283,13 +381,13 @@ def plot_dryer(rows, w, th, path):
     threshold_line(ax, door, "#7c3aed", f"door change {door:g}" if door is not None else "")
     ax.set_xlim(w.start, w.end + PERIOD)
     finish(ax, "dryer", w.start.tzinfo)
-    fig.suptitle(title("Dryer", w, th, ""))
+    fig.suptitle(title("Dryer", w, th))
     fig.autofmt_xdate()
     fig.savefig(path, dpi=110, bbox_inches="tight")
     plt.close(fig)
 
 
-def plot_washer(rows, w, th, note, path):
+def plot_washer(rows, w, th, path):
     fig, (water, door) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
     times = [r.t for r in rows]
     shade_running(water, rows)
@@ -306,7 +404,7 @@ def plot_washer(rows, w, th, note, path):
     door.set_xlim(w.start, w.end + PERIOD)
     finish(water, "water bands", w.start.tzinfo)
     finish(door, "door band drop", w.start.tzinfo)
-    fig.suptitle(title("Washer", w, th, note))
+    fig.suptitle(title("Washer", w, th))
     fig.autofmt_xdate()
     fig.savefig(path, dpi=110, bbox_inches="tight")
     plt.close(fig)
@@ -334,9 +432,10 @@ def main():
     first = Path(args.csv[0])
     out = Path(args.out) if args.out else first.with_name(f"{first.stem}_snapshots")
 
-    dryer_ws, washer_ws = dryer_windows(dryer), washer_windows(washer)
-    notes = end_notes(washer, washer_ws, thresholds)
-    dryer_ws, washer_ws = tag_matches(dryer, washer, dryer_ws, washer_ws)
+    dryer_ws, washer_ws = dryer_windows(dryer, thresholds), washer_windows(washer)
+    washer_ws = end_notes(washer, washer_ws, thresholds)
+    dryer_ws, washer_ws = tag_matches(dryer, washer, dryer_ws, washer_ws, thresholds)
+    washer_ws = keep_loudest_idle(washer, washer_ws)
 
     printed = []
     out.mkdir(parents=True, exist_ok=True)
@@ -352,15 +451,14 @@ def main():
                 name = file_name(n, machine, w)
                 rows = rows_in(rows_all, w)
                 th = thresholds.at(w.event)
-                note = notes.get(n - 1, "") if machine == "washer" else ""
                 if machine == "dryer":
                     plot_dryer(rows, w, th, folder / name)
                     peaks = [max(r.avg10 for r in rows), max(r.door for r in rows), "", "", ""]
                 else:
-                    plot_washer(rows, w, th, note, folder / name)
+                    plot_washer(rows, w, th, folder / name)
                     peaks = ["", "", max(r.w1 for r in rows), max(r.w2 for r in rows), max(r.drop for r in rows)]
                 index.writerow([f"{machine}/{name}", machine, w.label, day(w.start), f"{w.start:%H:%M:%S}",
-                                f"{w.end:%H:%M:%S}", *peaks, note])
+                                f"{w.end:%H:%M:%S}", *peaks, w.note])
                 printed.append((w.start, f"{day(w.start)} {w.start:%H:%M:%S}  {machine:6}  {w.label}"))
 
     for _, line in sorted(printed):
