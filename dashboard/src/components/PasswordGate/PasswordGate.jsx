@@ -1,21 +1,21 @@
 import { useState, useCallback } from 'react';
-import { adminFetch, getAdminPassword, setAdminPassword } from '../../utils/adminApi';
+import { clearAdminToken, getAdminToken, logIn } from '../../utils/adminApi';
 import styles from './PasswordGate.module.css';
 
-/** Renders children only once the server has accepted the password. */
+/** Renders children once the server has accepted the password; stays unlocked for 7 days. */
 export default function PasswordGate({ children }) {
-  const [unlocked, setUnlocked] = useState(false);
-  const [value, setValue] = useState(getAdminPassword());
+  const [unlocked, setUnlocked] = useState(() => Boolean(getAdminToken()));
+  const [value, setValue] = useState('');
   const [error, setError] = useState(null);
   const [checking, setChecking] = useState(false);
 
   // Stable identity: children's polling effects depend on it.
   const lock = useCallback(() => {
-    setAdminPassword('');
+    clearAdminToken();
     setUnlocked(false);
   }, []);
 
-  if (unlocked && getAdminPassword()) {
+  if (unlocked) {
     return children({ lock });
   }
 
@@ -23,13 +23,12 @@ export default function PasswordGate({ children }) {
     e.preventDefault();
     setChecking(true);
     setError(null);
-    setAdminPassword(value.trim());
-    const { ok, status, data } = await adminFetch('kind=auth');
+    const { ok, status, data } = await logIn(value.trim());
     setChecking(false);
     if (ok) {
+      setValue('');
       setUnlocked(true);
     } else {
-      setAdminPassword('');
       setError(status === 401 ? 'Wrong password.' : data?.error || `Could not reach the server (${status}).`);
     }
   };

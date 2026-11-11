@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { usePolling } from '../hooks/usePolling';
 import { adminFetch, formatAgo, nodeLabel } from '../utils/adminApi';
+import PasswordGate from '../components/PasswordGate/PasswordGate';
 import styles from './TestAdmin.module.css';
 
 const POLL_INTERVAL_MS = 15000;
-const publicPageLock = () => {};
 
 // Timers are stored in ms on the node; shown here in minutes.
 const FIELDS = [
@@ -186,7 +186,7 @@ export default function TestNodes() {
       <p className={styles.sub}>
         <Link to="/test">Sensor diagnostics</Link> · <Link to="/test/live">Live readings</Link>
       </p>
-      <NodeList lock={publicPageLock} />
+      <PasswordGate>{({ lock }) => <NodeList lock={lock} />}</PasswordGate>
     </div>
   );
 }

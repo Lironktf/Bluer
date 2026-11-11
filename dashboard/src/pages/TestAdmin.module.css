@@ -139,7 +139,8 @@
     color: #525252;
 }
 
-.recordingList a {
+.recordingList a,
+.recordingList button {
     margin-left: 0.6rem;
     color: #2563eb;
 }

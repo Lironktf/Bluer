@@ -1,6 +1,7 @@
 // Vercel Serverless Function for test tooling:
 //  - GET  (no kind)          raw heartbeat samples for /test/history (unchanged)
-//  - GET  ?kind=auth         validate the node settings password                [password]
+//  - GET  ?kind=auth         check the password; returns a 7-day token for the calls below
+//  Everything below needs that token (X-Admin-Token) or the password (X-Admin-Password):
 //  - GET  ?kind=nodes        every node's thresholds and history
 //  - PUT  ?kind=config       save a node's thresholds
 //  - GET  ?kind=telemetry    5 s readings for /test/live (nodes send them inside their reports to machines.js)
@@ -110,7 +111,21 @@ export async function nodeConfigForReport(machineId, configVersion) {
 
 const MAX_FAILED_LOGINS = 10;  // per IP, per FAILED_LOGIN_WINDOW_S
 const FAILED_LOGIN_WINDOW_S = 15 * 60;
+const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const sha256 = (value) => crypto.createHash('sha256').update(String(value)).digest();
+// Keyed by the password, so changing NODE_ADMIN_PASSWORD on Vercel cancels every token issued.
+const tokenSignature = (password, expires) => crypto.createHmac('sha256', password).update(`bluer-admin:${expires}`).digest('hex');
+
+function issueToken(password) {
+  const expires = Date.now() + TOKEN_TTL_MS;
+  return { token: `${expires}.${tokenSignature(password, expires)}`, expiresAt: new Date(expires) };
+}
+
+function validToken(password, token) {
+  const m = /^(\d{13})\.([0-9a-f]{64})$/.exec(String(token || ''));
+  if (!m || Number(m[1]) <= Date.now()) return false;
+  return crypto.timingSafeEqual(Buffer.from(m[2], 'hex'), Buffer.from(tokenSignature(password, m[1]), 'hex'));
+}
 
 let authIndexes = null;
 async function failedLogins() {
@@ -127,10 +142,17 @@ async function failedLogins() {
   return col;
 }
 
-async function checkAdmin(req, res) {
+async function checkAdmin(req, res, { allowToken = true } = {}) {
   const expected = process.env.NODE_ADMIN_PASSWORD;
   if (!expected) {
     res.status(503).json({ success: false, error: 'NODE_ADMIN_PASSWORD is not set on the server' });
+    return false;
+  }
+
+  if (allowToken && validToken(expected, req.headers['x-admin-token'])) return true;
+  // An expired token is not a wrong password: it must not count toward the lockout.
+  if (!req.headers['x-admin-password']) {
+    res.status(401).json({ success: false, error: 'Password required' });
     return false;
   }
 
@@ -450,6 +472,7 @@ async function recordingCsv(req, res) {
   const stamp = new Date(from).toISOString().slice(0, 16).replace(/[:T]/g, '-');
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${rec.nodeId}_${stamp}.csv"`);
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
   res.setHeader('Cache-Control', 'no-store');
   return res.status(200).send(`${csv}\n`);
 }
@@ -535,7 +558,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, X-Admin-Password'
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, X-Admin-Password, X-Admin-Token'
   );
 
   if (req.method === 'OPTIONS') {
@@ -548,10 +571,12 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET' && !kind) return await readHeartbeats(req, res);
 
-    if (kind === 'auth') {
-      if (!(await checkAdmin(req, res))) return;
+    if (req.method === 'GET' && kind === 'auth') {
+      if (!(await checkAdmin(req, res, { allowToken: false }))) return;
+      return res.status(200).json({ success: true, ...issueToken(process.env.NODE_ADMIN_PASSWORD) });
     }
-    if (req.method === 'GET' && kind === 'auth') return res.status(200).json({ success: true });
+    if (!(await checkAdmin(req, res))) return;
+
     if (req.method === 'GET' && kind === 'nodes') return await listNodes(res);
     if (req.method === 'PUT' && kind === 'config') return await saveConfig(req, res);
     if (req.method === 'GET' && kind === 'telemetry') return await readTelemetry(req, res);

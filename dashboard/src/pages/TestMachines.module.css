@@ -82,26 +82,3 @@
     font-size: 0.8125rem;
     color: #a3a3a3;
 }
-
-/* TEMPORARY password check */
-.passwordCheck {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.6rem;
-    margin-bottom: 1.5rem;
-    font-size: 0.875rem;
-}
-
-.passwordCheck input,
-.passwordCheck button {
-    padding: 0.3rem 0.5rem;
-    border: 1px solid #d4d4d4;
-    border-radius: 6px;
-    font: inherit;
-}
-
-.passOk {
-    color: #15803d;
-    font-weight: 600;
-}

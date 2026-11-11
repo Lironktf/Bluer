@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { usePolling } from '../hooks/usePolling';
-import { adminFetch, diagnosticsUrl, formatAgo, nodeLabel } from '../utils/adminApi';
+import { adminFetch, downloadFile, formatAgo, nodeLabel } from '../utils/adminApi';
+import PasswordGate from '../components/PasswordGate/PasswordGate';
 import styles from './TestAdmin.module.css';
 
 const POLL_INTERVAL_MS = 15000;
-const publicPageLock = () => {};
 const PERIOD_MS = 5000;
 const SUMMARY_SECONDS = 15;
 const FETCH_MINUTES = 30; // the table covers this; graphs show the last CHART_MS of it
@@ -175,15 +175,16 @@ function Chart({ title, samples: allSamples, series, thresholds: allThresholds, 
 
 // While on (a day at most), the server keeps every 5 s reading from this pair; each recording
 // can be downloaded for 3 days after it ends, then the server deletes it.
-function Recording({ nodeId }) {
+function Recording({ nodeId, lock }) {
   const [list, setList] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
   const load = useCallback(async () => {
-    const { ok, data } = await adminFetch(`kind=recordings&nodeId=${encodeURIComponent(nodeId)}`);
+    const { ok, status, data } = await adminFetch(`kind=recordings&nodeId=${encodeURIComponent(nodeId)}`);
+    if (status === 401) return lock();
     if (ok) setList(data.recordings || []);
-  }, [nodeId]);
+  }, [nodeId, lock]);
 
   useEffect(() => {
     setList(null);
@@ -207,6 +208,10 @@ function Recording({ nodeId }) {
 
   const when = (iso) => new Date(iso).toLocaleString();
 
+  const download = async (r) => {
+    setError(await downloadFile(`kind=recordingCsv&id=${r.id}`, `${nodeId}.csv`));
+  };
+
   return (
     <div className={styles.recording}>
       <div className={styles.recordingBar}>
@@ -227,7 +232,7 @@ function Recording({ nodeId }) {
           {list.map((r) => (
             <li key={r.id}>
               {when(r.startedAt)} – {r.stoppedAt ? when(r.stoppedAt) : 'now'}
-              <a href={diagnosticsUrl(`kind=recordingCsv&id=${r.id}`)}>Download CSV</a>
+              <button type="button" className={styles.linkButton} onClick={() => download(r)}>Download CSV</button>
               {r.expireAt && <span className={styles.muted}> · deleted {when(r.expireAt)}</span>}
             </li>
           ))}
@@ -319,7 +324,7 @@ function Live({ lock }) {
       </div>
 
       {!nodeId && <p className={styles.muted}>Choose a node.</p>}
-      {nodeId && <Recording nodeId={nodeId} />}
+      {nodeId && <Recording nodeId={nodeId} lock={lock} />}
       {error && <p className={styles.error}>Could not load: {error}</p>}
 
       {nodeId && data && (
@@ -447,7 +452,7 @@ export default function TestLive() {
         Highest reading in each 5 s, sent by every node all the time, summarized every {SUMMARY_SECONDS} s. Refreshes
         every {POLL_INTERVAL_MS / 1000}s. <Link to="/test/nodes">Node settings</Link> · <Link to="/test">Sensor diagnostics</Link>
       </p>
-      <Live lock={publicPageLock} />
+      <PasswordGate>{({ lock }) => <Live lock={lock} />}</PasswordGate>
     </div>
   );
 }

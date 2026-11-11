@@ -9,7 +9,7 @@ On /test/live choose the pair, press Start recording, run your tests, then Downl
     python3 snapshot_recording.py day1.csv day2.csv --out my_test
 
 Quiet stretches are skipped. Everything else becomes a PNG:
-  washer  ~20 s around every burst of water over 10,000 (first fill, refills, a neighbour) or door
+  washer  ~20 s around every burst of water over 20,000 (first fill, refills, a neighbour) or door
           drop over 700,000. Both sit below the node's thresholds on purpose, so near misses show.
           The last water-in before the washer stops running says when it stopped. Of a run of
           neighbour-only bursts (water while idle, no door), only the loudest is saved.
@@ -38,7 +38,7 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 
 # Quiet cutoffs: a stretch below all four is never graphed.
-WASHER_WATER = 10_000
+WASHER_WATER = 20_000  # a washer's own running background and faint neighbours sit around 10,000-20,000
 WASHER_DOOR = 700_000
 # The dryer uses the node's own thresholds; these apply only to a CSV downloaded before they were included.
 DRYER_ON = 2.2
@@ -232,8 +232,11 @@ def end_notes(washer, windows, thresholds):
             # Without thresholds in the CSV, refill_hit falls back to the quiet cutoff.
             level = f"refill threshold ({th['refill']:,.0f})" if "refill" in th else f"quiet cutoff ({WASHER_WATER:,})"
             dipped = rows[k + 1].t if k + 1 < len(rows) else rows[k].t + PERIOD
+            # Readings missing just before the end (Wi-Fi was down) mean it ended somewhere in the gap.
+            ended = (f"between {prev.t:%H:%M:%S} and {r.t:%H:%M:%S} (readings missing)"
+                     if r.t - prev.t > 3 * PERIOD else f"at {r.t:%H:%M:%S}")
             windows[i] = windows[i]._replace(note=(
-                f"This is last water in, washer ended at {r.t:%H:%M:%S} (running went false), "
+                f"This is last water in, washer ended {ended} (running went false), "
                 f"{duration(r.t - dipped)} after the water dropped below the {level} at {dipped:%H:%M:%S}"))
             break
     return windows

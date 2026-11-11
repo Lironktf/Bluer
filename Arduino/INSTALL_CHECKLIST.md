@@ -192,7 +192,7 @@ Use `plot_dryer_washer.py` (or the live readings page, section 7). Write the num
 
 ### 7. Remote operation and remaining work
 
-**Thresholds page (`/test/nodes`, currently not password protected):**
+**Thresholds page (`/test/nodes`; it and `/test/live` need `NODE_ADMIN_PASSWORD`, remembered for 7 days per browser):**
 - Shows every node's live thresholds: dryer on-threshold and door change; washer first-fill, refill, refill timer,
   door drop, full and max cycle timers. Also a history of what each one was set to before.
 - What is on the page is exactly what the node uses. The node picks up changes in the reply to its next report
