@@ -107,9 +107,13 @@ website, are relayed through the dryer and are saved across restarts; built-in d
 - [ ] Open `/test/nodes` for each pair: save if not saved before, otherwise review the existing values.
   Confirm the applied version after both sensors/boards are online; do not overwrite individual tuning
   with generic defaults. Test refill modes 1 (lower band), 2 (either), and 3 (upper band) where needed
-- [ ] Pack the supplies/cables for the chosen hardware path, plus spares
+- [ ] Pack the supplies/cables for the chosen hardware path, plus spares, including extra wall plugs (USB
+  power adapters)
 - [ ] Tape (section 3), cable clips, cable ties, secondary restraints, "BLUER - DO NOT UNPLUG" labels
-- [ ] Anti-vibration pads for machines that touch, only with facilities' approval
+- [ ] Foam between machines (section 3), only with facilities' approval. Cheapest option: a roll of
+  self-adhesive foam or EPDM rubber weatherstripping (hardware store door/window aisle, about 1/4" thick)
+- [ ] Spare INMP441 mics, for swapping out any that read low in the baseline test (section 4)
+- [ ] iPhone with the artificial water-in video, for the mic baseline test (section 4)
 - [ ] Laptop with Arduino IDE and live readings working, isopropyl alcohol, lint-free cloths, multimeter,
   soldering/crimp tools and heat-shrink for low-voltage wiring repairs
 
@@ -125,6 +129,8 @@ website, are relayed through the dryer and are saved across restarts; built-in d
   locking connectors. Insulate exposed joints with heat-shrink and gently tug-test every wire
 - [ ] Secure the cable jacket to the enclosure so pulling a cable cannot load sensor pins or solder joints
 - [ ] No changes to appliance mains wiring, grounding, hoses, vents or safety interlocks
+- [ ] Tape over every power connection (wall plug into the outlet, cable into the plug, cable into the board)
+  so no cable can work loose under its own weight
 - [ ] Label both ends "BLUER - DO NOT UNPLUG"
 
 ### 3. Mounting
@@ -146,13 +152,30 @@ website, are relayed through the dryer and are saved across restarts; built-in d
   the actual mounting temperature and the chosen adhesive's datasheet limits; no tape guarantees forever
 - [ ] Mic port (3D design change): the mic comes **out of the print** through an opening or short tube, aimed at
       the washer's water inlet valve, as close as possible. Acoustic mesh over it if lint is an issue.
-- [ ] Pads between any machines whose cabinets touch (ask facilities first)
+- [ ] Foam between every pair of machines whose cabinets touch or nearly touch (ask facilities first), so one
+  machine's vibration can't set off its neighbour's sensor. Stick self-adhesive foam strips on one machine's
+  side panel near the top and bottom corners, after cleaning with isopropyl alcohol. If the foam isn't
+  self-adhesive, hold each strip with short pieces of the same tape along its top and bottom edges only, so it
+  still squashes between the cabinets. Keep it clear of vents, hoses and access panels
 - [ ] If adhesive cable-tie bases are used, choose rated industrial parts and treat them as strain relief,
       not the sole enclosure restraint. Any magnet alternative needs facilities approval and a safety tether
 
 ### 4. Graph testing (per pair, before leaving that pair)
 
 Use `plot_dryer_washer.py` (or the live readings page, section 7). Write the numbers down for each pair.
+
+**Testing day:**
+- [ ] Right after flashing each node, start a recording for that pair on `/test/live`
+- [ ] Turn all the machines on, and write down when each one started and when its display says it will end.
+  Later, run `Arduino/tools/snapshot_recording.py` on each pair's recording CSV and compare its start and end
+  snapshots with these notes
+
+**Mic baseline (every washer, when its node is refreshed):**
+- [ ] Play the same artificial water-in video from the iPhone at the same distance from the mic and at the
+  same volume, and note the peak of both water bands on `/test/live`
+- [ ] Every mic should reach similar numbers. Replace any mic that reads clearly low with a spare that day.
+  Then, if one washer hears a neighbour much more than the others do, that's the machines' own noise, not
+  the mic, so tune the thresholds around it
 
 **Dryer:**
 - [ ] Run this dryer alone: note `DryerAvg10` while running
