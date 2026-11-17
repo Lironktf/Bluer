@@ -103,6 +103,9 @@ website, are relayed through the dryer and are saved across restarts; built-in d
 ### 1. Before leaving home
 
 - [ ] Remote thresholds and live readings deployed and home-tested; every board compiled, flashed and tested
+- [ ] Test the 30-min full reset (section 7) on the home-test build: temporarily set `NO_SERVER_RESET_MS` to
+  3 min, turn home Wi-Fi off once it reports, and check the Serial Monitor shows `[SUPERVISOR] Full reset` and
+  it reconnects and reports (reset reason 8) when Wi-Fi is back. Set it back to 30 min before the final flash
 - [ ] Record existing per-machine settings before flashing; use [MACHINES.md](MACHINES.md) as the registry
 - [ ] Open `/test/nodes` for each pair: save if not saved before, otherwise review the existing values.
   Confirm the applied version after both sensors/boards are online; do not overwrite individual tuning
@@ -244,6 +247,17 @@ Use `plot_dryer_washer.py` (or the live readings page, section 7). Write the num
 - Both classic ESP32 sketches schedule an idle restart after 24-30 hours and a 7-day absolute restart cap.
   An active cycle can defer the idle restart. Watchdogs and sensor recovery are additional backstops,
   not a guarantee of unattended operation or a replacement for mounting inspections.
+- The dryer first retries on its own: a Wi-Fi re-join after 5 failed reports, and a full Wi-Fi restart after
+  3 min offline. These restart only the Wi-Fi, so a fault in the rest of the chip survives them.
+- Last resort, added after node 2 stayed powered but silent for 4 days in Nov 2026 until it was unplugged: if no
+  report has reached the website for 30 min, the dryer fully resets itself with a 1 s deep sleep. That powers
+  down the radio and most of the chip, the closest software gets to unplugging it, and it doesn't wait for the
+  dryer to be idle. On `/test` the reset reason shows as "deep sleep (8)". During a real eduroam or website
+  outage nodes reset every 30 min until it's back, which is harmless.
+- **What isn't covered:** a board whose hardware is genuinely failing, so that even the deep reset doesn't help
+  and only cutting power does. If that happens you'll see "deep sleep (8)" resets every 30 min on `/test` with
+  no reports between them. That's the signal to swap the board, which is why replacing node 2's power supply
+  and cable on the day is still worth doing.
 
 **Weekly email check:**
 - [ ] Script that reviews the week's test history and emails only on a serious issue: a node offline for hours,

@@ -5,6 +5,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_task_wdt.h"
+#include "esp_sleep.h"
 #include "secrets.h"
 #include <NimBLEDevice.h>
 #include <WiFiClientSecure.h>
@@ -76,6 +77,9 @@ volatile unsigned long loopHeartbeat = 0;
 const unsigned long LOOP_STALL_TIMEOUT_MS = 120000UL;  // loop frozen this long -> reboot
 volatile unsigned long netHeartbeat = 0;
 const unsigned long NET_STALL_TIMEOUT_MS = 120000UL;   // covers a 30 s connect plus slow HTTPS
+// Alive but never reaching the website (Wi-Fi or login stuck): node 2 sat like this for 4 days in Nov 2026.
+volatile unsigned long lastServerReplyAt = 0;
+const unsigned long NO_SERVER_RESET_MS = 30UL * 60UL * 1000UL;
 uint64_t preventiveRebootUs = 0;            // 24 h + per-node jitter, set in setup()
 const uint64_t ABSOLUTE_REBOOT_US = 604800000ULL * 1000ULL;  // 7 days, regardless of state
 const int MAX_HTTP_FAILURES = 5;
@@ -371,6 +375,14 @@ void hardRestart(const char* why) {
   // If esp_restart() ever wedges in a shutdown handler, the task watchdog fires.
 }
 
+// A 1 s deep sleep powers down the radio and most of the chip: much closer to unplugging it than esp_restart().
+void fullReset(const char* why) {
+  Serial.printf("[SUPERVISOR] Full reset: %s\n", why);
+  Serial.flush();
+  esp_sleep_enable_timer_wakeup(1000000ULL);
+  esp_deep_sleep_start();
+}
+
 void connectToEduroam() {
   Serial.printf("[WIFI] Configuring secure Waterloo eduroam connection... (heap=%u maxAlloc=%u)\n",
                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
@@ -556,6 +568,9 @@ void supervisorTask(void* parameter) {
     if ((long)(millis() - netHeartbeat) > (long)NET_STALL_TIMEOUT_MS) {
       hardRestart("network task stalled");
     }
+    if ((long)(millis() - lastServerReplyAt) > (long)NO_SERVER_RESET_MS) {
+      fullReset("no report reached the website for 30 min");
+    }
 
     uint64_t upUs = (uint64_t)esp_timer_get_time();  // 64-bit: never rolls over
 
@@ -598,6 +613,7 @@ void setup() {
 
   loopHeartbeat = millis();
   netHeartbeat = millis();
+  lastServerReplyAt = millis();
 
   esp_task_wdt_config_t wdtCfg = {
     .timeout_ms = 30000,
@@ -932,6 +948,7 @@ bool sendReport(const ReportStatus& st) {
   unsigned long postStart = millis();
   int code = httpPostJson(serverUrl, reportJson, &reply);
   netHeartbeat = millis();
+  if (code >= 200 && code < 500) lastServerReplyAt = millis();  // the website answered, even if it refused
   // A 4xx is the server refusing this report, so resending it can't help and would block every
   // later status. Its readings are dropped; the status goes out again with the next report.
   bool rejected = code >= 400 && code < 500 && code != 408 && code != 429;
