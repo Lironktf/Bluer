@@ -79,7 +79,7 @@ volatile unsigned long netHeartbeat = 0;
 const unsigned long NET_STALL_TIMEOUT_MS = 120000UL;   // covers a 30 s connect plus slow HTTPS
 // Alive but never reaching the website (Wi-Fi or login stuck): node 2 sat like this for 4 days in Nov 2026.
 volatile unsigned long lastServerReplyAt = 0;
-const unsigned long NO_SERVER_RESET_MS = 30UL * 60UL * 1000UL;
+const unsigned long NO_SERVER_RESET_MS = 10UL * 60UL * 1000UL;
 uint64_t preventiveRebootUs = 0;            // 24 h + per-node jitter, set in setup()
 const uint64_t ABSOLUTE_REBOOT_US = 604800000ULL * 1000ULL;  // 7 days, regardless of state
 const int MAX_HTTP_FAILURES = 5;
@@ -391,7 +391,9 @@ void connectToEduroam() {
   pAdvertising->stop();
 
   WiFi.mode(WIFI_STA);
-  WiFi.setAutoReconnect(true);
+  // Off: the library would retry a rejected eduroam login instantly, over and over, and clash with
+  // maintainWiFiConnection() ("sta is connecting, return error"). That loop retries with backoff instead.
+  WiFi.setAutoReconnect(false);
   WiFi.setTxPower(WIFI_POWER_11dBm);  // halves peak TX current on a shared supply
   // WiFi.onEvent() is registered once in setup(): it has no dedup and would leak here.
 
@@ -569,7 +571,7 @@ void supervisorTask(void* parameter) {
       hardRestart("network task stalled");
     }
     if ((long)(millis() - lastServerReplyAt) > (long)NO_SERVER_RESET_MS) {
-      fullReset("no report reached the website for 30 min");
+      fullReset("no report reached the website for 10 min");
     }
 
     uint64_t upUs = (uint64_t)esp_timer_get_time();  // 64-bit: never rolls over

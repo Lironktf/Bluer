@@ -10,6 +10,7 @@ const PERIOD_MS = 5000;
 const SUMMARY_SECONDS = 15;
 const FETCH_MINUTES = 30; // the table covers this; graphs show the last CHART_MS of it
 const CHART_MS = 2.5 * 60000;
+const HISTORY_MS = 10 * 60000; // how far back the graph slider reaches
 const DRYER_Y_CAP = 15;
 const WASHER_Y_CAP = 150000;
 const DOOR_Y_CAP = 1000000;
@@ -102,13 +103,21 @@ function niceStep(raw) {
 
 const fmtTick = (v) => (v >= 1e6 ? `${fmt(v / 1e6, 2)}M` : v >= 1000 ? `${fmt(v / 1000, 1)}k` : fmt(v, 2));
 
-function Chart({ title, samples: allSamples, series, thresholds: allThresholds, runningKey, start, end, yCap }) {
+const fmtBehind = (ms) => {
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`;
+};
+
+function Chart({ title, samples: allSamples, series, thresholds: allThresholds, runningKey, start, end, yCap, scroll }) {
   const W = 1000;
   const H = 200;
   const TOP = 4; // keeps a line capped at the top edge visible
   const span = Math.max(end - start, 1);
   const thresholds = allThresholds.filter((t) => typeof t.value === 'number');
-  const samples = allSamples.filter((s) => new Date(s.ts).getTime() >= start - PERIOD_MS);
+  const samples = allSamples.filter((s) => {
+    const t = new Date(s.ts).getTime();
+    return t >= start - PERIOD_MS && t <= end + PERIOD_MS;
+  });
 
   const values = samples.flatMap((s) => series.map((d) => s[d.key])).filter((v) => typeof v === 'number');
   const yMax = yCap ?? Math.max(1e-6, ...values, ...thresholds.map((t) => t.value)) * 1.15;
@@ -166,8 +175,25 @@ function Chart({ title, samples: allSamples, series, thresholds: allThresholds, 
       </div>
       <div className={styles.axis}>
         <span>{new Date(start).toLocaleTimeString()}</span>
-        <span>{yCap ? `top ${fmt(yCap, 0)} (higher values drawn flat at the top)` : `max shown ${fmt(yMax, 0)}`}</span>
         <span>{new Date(end).toLocaleTimeString()}</span>
+      </div>
+      {scroll && (
+        <div className={styles.scroll}>
+          <input
+            type="range"
+            min={scroll.min}
+            max={scroll.max}
+            step="any"
+            value={end}
+            disabled={scroll.max <= scroll.min}
+            onChange={(e) => scroll.onChange(Number(e.target.value))}
+            aria-label="Scroll back through the last 10 minutes"
+          />
+          <span>{end >= scroll.max ? 'newest (follows new readings)' : `${fmtBehind(scroll.max - end)} before newest`}</span>
+        </div>
+      )}
+      <div className={styles.capNote}>
+        {yCap ? `top ${fmt(yCap, 0)} (higher values drawn flat at the top)` : `max shown ${fmt(yMax, 0)}`}
       </div>
     </figure>
   );
@@ -248,6 +274,7 @@ function Live({ lock }) {
   const [nodes, setNodes] = useState([]);
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const [viewEnd, setViewEnd] = useState(null); // null: follow the newest reading
   const currentQuery = useRef('');
 
   const loadNodes = useCallback(async () => {
@@ -278,6 +305,7 @@ function Live({ lock }) {
 
   useEffect(() => {
     setData(null);
+    setViewEnd(null);
   }, [nodeId]);
 
   usePolling(loadTelemetry, POLL_INTERVAL_MS);
@@ -294,8 +322,16 @@ function Live({ lock }) {
   // Fills left to right from the first reading, then scrolls with the newest one.
   const firstTs = samples.length ? new Date(samples[0].ts).getTime() : Date.now();
   const lastTs = samples.length ? new Date(samples[samples.length - 1].ts).getTime() : Date.now();
-  const end = Math.max(firstTs + CHART_MS, lastTs);
+  const liveEnd = Math.max(firstTs + CHART_MS, lastTs);
+  const earliestEnd = Math.max(firstTs + CHART_MS, liveEnd - HISTORY_MS + CHART_MS);
+  // A slid-back view stays put as new readings arrive, until it falls out of the 10 min.
+  const end = viewEnd === null ? liveEnd : Math.min(Math.max(viewEnd, earliestEnd), liveEnd);
   const start = end - CHART_MS;
+  const scroll = {
+    min: earliestEnd,
+    max: liveEnd,
+    onChange: (v) => setViewEnd(v >= liveEnd ? null : v),
+  };
 
   const over = (value, limit) => (typeof value === 'number' && typeof limit === 'number' && value > limit ? styles.over : undefined);
   // First fill counts on either band; refill bands follow the node's selected mode.
@@ -354,6 +390,7 @@ function Live({ lock }) {
             samples={samples}
             start={start}
             end={end}
+            scroll={scroll}
             runningKey="dRunning"
             yCap={DRYER_Y_CAP}
             series={[
@@ -370,6 +407,7 @@ function Live({ lock }) {
             samples={samples}
             start={start}
             end={end}
+            scroll={scroll}
             runningKey="wRunning"
             yCap={WASHER_Y_CAP}
             series={[
@@ -386,6 +424,7 @@ function Live({ lock }) {
             samples={samples}
             start={start}
             end={end}
+            scroll={scroll}
             runningKey="wRunning"
             yCap={DOOR_Y_CAP}
             series={[
