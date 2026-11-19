@@ -74,9 +74,10 @@ const unsigned long LOOP_STALL_TIMEOUT_MS = 120000UL;  // loop frozen this long 
 volatile unsigned long netHeartbeat = 0;
 const unsigned long NET_STALL_TIMEOUT_MS = 120000UL;   // covers a slow HTTPS POST
 // Alive but never reaching the website (Wi-Fi stuck, or off the allow list): node 2 sat like this for 4 days in Nov 2026.
-// It keeps resetting every 10 min until the website answers again, so it recovers by itself.
+// It keeps resetting every 5 min until the website answers again, so it recovers by itself.
+// 5, not 10: on Nov 18-19 the first report after a reset usually got through when the old session couldn't.
 volatile unsigned long lastServerReplyAt = 0;
-const unsigned long NO_SERVER_RESET_MS = 10UL * 60UL * 1000UL;
+const unsigned long NO_SERVER_RESET_MS = 5UL * 60UL * 1000UL;
 uint64_t preventiveRebootUs = 0;            // 24 h + per-node jitter, set in setup()
 const uint64_t ABSOLUTE_REBOOT_US = 604800000ULL * 1000ULL;  // 7 days, regardless of state
 const int MAX_HTTP_FAILURES = 5;
@@ -503,7 +504,7 @@ void supervisorTask(void* parameter) {
       hardRestart("network task stalled");
     }
     if ((long)(millis() - lastServerReplyAt) > (long)NO_SERVER_RESET_MS) {
-      fullReset("no report reached the website for 10 min");
+      fullReset("no report reached the website for 5 min");
     }
 
     uint64_t upUs = (uint64_t)esp_timer_get_time();  // 64-bit: never rolls over
@@ -886,10 +887,9 @@ bool sendReport(const ReportStatus& st) {
   netHeartbeat = millis();
   // A sign-in page on an open network can answer 200 too; only the website's own reply counts.
   bool delivered = code >= 200 && code < 300 && applyServerReply(reply);
-  // A 4xx is the server refusing this report, so resending it can't help and would block every
-  // later status. Its readings are dropped; the status goes out again with the next report.
-  bool rejected = code >= 400 && code < 500 && code != 408 && code != 429;
-  if (!delivered && !rejected) {
+  // Readings stay queued on any failure: on the open campus network a 4xx can come from the network, not
+  // the website. A report the website truly refuses is cleared by the 5 min reset.
+  if (!delivered) {
     Serial.printf("❌ Report failed: %d (%s) after %lu ms, rssi=%d dBm, maxAlloc=%u, queued d=%d w=%d\n", code,
                   HTTPClient::errorToString(code).c_str(), millis() - postStart, (int)WiFi.RSSI(),
                   (unsigned)ESP.getMaxAllocHeap(), nd, nw);
@@ -909,10 +909,6 @@ bool sendReport(const ReportStatus& st) {
   portENTER_CRITICAL(&washerMux);
   if (nw > 0) washerQ.dropThrough(sendW[nw - 1].seq);
   portEXIT_CRITICAL(&washerMux);
-  if (rejected) {
-    Serial.printf("❌ Report rejected by the server: %d, dropped d=%d w=%d\n", code, nd, nw);
-    return false;
-  }
   lastServerReplyAt = millis();
   // stack free = the least each task has had spare since boot, in bytes
   Serial.printf("✅ Report %d: d=%d w=%d dryer run=%d empty=%d, washer %s, heap=%u, stack free net=%u loop=%u\n",

@@ -84,8 +84,8 @@ firmware uses a different BLE format. Use these main sketches, not the nested `*
   > Device 1: 70:4b:ca:99:62:a0
   > Device 2: b4:bf:e9:05:01:14
 - [ ] **Renew the allow list before it expires** (1 year max). Put a reminder in your calendar a couple of weeks
-  before. If it lapses the dryers go offline, keep retrying and resetting every 10 min, and come back by
-  themselves within about 10 min of being re-added; no reflash needed
+  before. If it lapses the dryers go offline, keep retrying and resetting every 5 min, and come back by
+  themselves within about 5 min of being re-added; no reflash needed
 - [ ] Delete old `secrets.h` copies (they hold an eduroam password); the dryer no longer uses them
 - [ ] The dryer does not fit the default app partition. The OTA partition reserves space only; it does not
   mean remote firmware updates are implemented
@@ -128,8 +128,8 @@ website, are relayed through the dryer and are saved across restarts; built-in d
 ### 1. Before leaving home
 
 - [ ] Remote thresholds and live readings deployed and home-tested; every board compiled, flashed and tested
-- [ ] Test the 10-min full reset (section 7) on the home-test build: turn home Wi-Fi off once it reports, and
-  check the Serial Monitor shows `[SUPERVISOR] Full reset` after 10 min and it reconnects and reports (reset
+- [ ] Test the 5-min full reset (section 7) on the home-test build: turn home Wi-Fi off once it reports, and
+  check the Serial Monitor shows `[SUPERVISOR] Full reset` after 5 min and it reconnects and reports (reset
   reason 8) when Wi-Fi is back
 - [ ] Test Wi-Fi recovery on the home-test build: turn the router off for 1 min, then on. The node should
   print "Not connected. Restarting Wi-Fi..." and report again within about a minute of the router being back
@@ -292,13 +292,13 @@ Use `plot_dryer_washer.py` (or the live readings page, section 7). Write the num
   after 5 failed reports. These restart only the Wi-Fi, so a fault in the rest
   of the chip survives them.
 - Last resort, added after node 2 stayed powered but silent for 4 days in Nov 2026 until it was unplugged: if no
-  report has reached the website for 10 min, the dryer fully resets itself with a 1 s deep sleep. That powers
+  report has reached the website for 5 min, the dryer fully resets itself with a 1 s deep sleep. That powers
   down the radio and most of the chip, the closest software gets to unplugging it, and it doesn't wait for the
   dryer to be idle. On `/test` the reset reason shows as "deep sleep (8)". During a Wi-Fi or website outage, or
-  while off the allow list, nodes reset every 10 min until it's back, which is harmless. Only a real reply from
+  while off the allow list, nodes reset every 5 min until it's back, which is harmless. Only a real reply from
   the website counts, so a Wi-Fi sign-in page can't stop the resets.
 - **What isn't covered:** a board whose hardware is genuinely failing, so that even the deep reset doesn't help
-  and only cutting power does. If that happens you'll see "deep sleep (8)" resets every 10 min on `/test` with
+  and only cutting power does. If that happens you'll see "deep sleep (8)" resets every 5 min on `/test` with
   no reports between them. That's the signal to swap the board, which is why replacing node 2's power supply
   and cable on the day is still worth doing.
 
