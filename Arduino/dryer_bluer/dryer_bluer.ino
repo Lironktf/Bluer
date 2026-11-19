@@ -380,7 +380,7 @@ void fullReset(const char* why) {
 void connectToWiFi() {
   lastWifiAttempt = millis();
   WiFi.mode(WIFI_STA);
-  WiFi.setTxPower(WIFI_POWER_11dBm);  // halves peak TX current on a shared supply
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);  // full power: at about -77 dBm, uploads timed out at 11 dBm
   // WiFi.onEvent() is registered once in setup(): it has no dedup and would leak here.
   Serial.printf("[WIFI] Connecting to %s, MAC %s\n", WIFI_SSIDS[wifiSsid], WiFi.macAddress().c_str());
   WiFi.begin(WIFI_SSIDS[wifiSsid], WIFI_PASSWORD);
