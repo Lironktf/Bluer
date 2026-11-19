@@ -1,12 +1,10 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
-#include "esp_eap_client.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_task_wdt.h"
 #include "esp_sleep.h"
-#include "secrets.h"
 #include <NimBLEDevice.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>  // v7
@@ -21,12 +19,12 @@ TaskHandle_t loopTaskH = NULL;  // for the stack headroom in the report log
 extern const uint8_t rootca_crt_bundle_start[] asm("_binary_x509_crt_bundle_start");
 #endif
 
-// University of Waterloo eduroam configuration.
-// Replace only the password before uploading.
-// Do not include < or > around the password. A ! does not need escaping.
-const char* EDUROAM_SSID = "eduroam";
-const char* EAP_IDENTITY = "anonymous@uwaterloo.ca";
-const char* EXPECTED_SERVER_NAME = "eduroam.uwaterloo.ca";
+// Open campus Wi-Fi, no login: IST allow-lists each dryer board's MAC (printed at boot), renewed yearly.
+// Confirmed in the SJU laundry room on Nov 18, 2026. Some buildings call it uw-wifi-no-encryption instead.
+const char* const WIFI_SSIDS[] = {"UniversityOfWaterloo"};
+const char* WIFI_PASSWORD = "";  // open network
+const int WIFI_SSID_COUNT = sizeof(WIFI_SSIDS) / sizeof(WIFI_SSIDS[0]);
+int wifiSsid = 0;
 
 // MPU6050 wiring: SDA -> GPIO 21, SCL -> GPIO 22, VCC -> 3V3, GND -> GND, AD0 -> GND; INT unused.
 #define MPU_ADDR 0x68  // I2C address from datasheet (AD0 should be logic low, wire to GND)
@@ -42,7 +40,7 @@ const char* EXPECTED_SERVER_NAME = "eduroam.uwaterloo.ca";
 // sens (LSB/g)= 16384  8192 4096 2048
 static const int LSB_SENS_TABLE[4]{ 16384, 8192, 4096, 2048 };
 #define ACCEL_SCALE 3
-const float LSB_SENS = LSB_SENS_TABLE[ACCEL_SCALE];  //SAMEPLE TIME 10s, SLEEPTIME CYCLE, 10min
+const float LSB_SENS = LSB_SENS_TABLE[ACCEL_SCALE];
 
 // Read by supervisorTask on core 0, written by loop() on core 1.
 volatile bool empty = true;
@@ -62,13 +60,11 @@ NimBLEScan* pBLEScan;
 NimBLEAdvertising* pAdvertising;
 uint8_t pairNumber = 0;  // the digits at the end of machineId, shared with the paired washer
 
-// Wi-Fi reconnect timing
-unsigned long lastWifiReconnectAttempt = 0;
-unsigned long wifiBackoffMs = 15000;
-const unsigned long WIFI_BACKOFF_MAX = 300000UL;
-const unsigned long WIFI_HARD_RESET_MS = 180000UL;  // offline this long -> full radio re-init
-bool wifiIsDown = false;
-unsigned long wifiDownSince = 0;
+// Wi-Fi retry timing
+const unsigned long WIFI_RETRY_MIN_MS = 30000UL;  // an open-network join takes a few seconds
+const unsigned long WIFI_RETRY_MAX_MS = 300000UL;
+unsigned long wifiRetryMs = WIFI_RETRY_MIN_MS;
+unsigned long lastWifiAttempt = 0;
 volatile bool wifiReinitRequested = false;  // set after repeated failed reports, serviced by the network task
 
 // ---------------- Reliability supervision ----------------
@@ -76,8 +72,9 @@ volatile bool wifiReinitRequested = false;  // set after repeated failed reports
 volatile unsigned long loopHeartbeat = 0;
 const unsigned long LOOP_STALL_TIMEOUT_MS = 120000UL;  // loop frozen this long -> reboot
 volatile unsigned long netHeartbeat = 0;
-const unsigned long NET_STALL_TIMEOUT_MS = 120000UL;   // covers a 30 s connect plus slow HTTPS
-// Alive but never reaching the website (Wi-Fi or login stuck): node 2 sat like this for 4 days in Nov 2026.
+const unsigned long NET_STALL_TIMEOUT_MS = 120000UL;   // covers a slow HTTPS POST
+// Alive but never reaching the website (Wi-Fi stuck, or off the allow list): node 2 sat like this for 4 days in Nov 2026.
+// It keeps resetting every 10 min until the website answers again, so it recovers by itself.
 volatile unsigned long lastServerReplyAt = 0;
 const unsigned long NO_SERVER_RESET_MS = 10UL * 60UL * 1000UL;
 uint64_t preventiveRebootUs = 0;            // 24 h + per-node jitter, set in setup()
@@ -95,7 +92,6 @@ bool sensorHealthy = true;
 const char* SENSOR_OK = "ok";
 const char* SENSOR_FLAT = "flat";
 const char* SENSOR_NOREPLY = "noreply";
-const char* SENSOR_UNKNOWN = "unknown";
 const char* sensorState = SENSOR_OK;
 
 uint32_t nodeSalt = 0;  // per-node timer jitter so the fleet never reboots in lockstep
@@ -112,7 +108,7 @@ bool resetMpu();
 bool setup_mpu();
 bool write_to(const byte to_register, const byte write_value);
 bool read_from(const byte from_register, const int num_bytes, byte read_data[]);
-void connectToEduroam();
+void connectToWiFi();
 void hardRestart(const char* why);
 const int WINDOW = 20;      // 20 samples × 50 ms = 1 second, used to make activity variable
 const int WINDOWTWO = 10;   // 10 samples of activity variable = 10 seconds of data
@@ -121,8 +117,6 @@ int idx = 0;                //Index variables to store array values
 int idxtwo = 0;
 int idxthree = 0;
 int activitysmallIdx = 0;
-//int quiettime = 0;     //Time between door opening and door opening, used to detect each event properly (seperatly)
-//int doorCooldown = 0;  //Used to stop door opening from becoming true due to the closing vibration in the case where the user is closing the door right after opening it
 
 float
   mpu_a_x,
@@ -193,7 +187,7 @@ const unsigned long RETRY_MAX_MS = 60000;
 const unsigned long WASHER_RECENT_MS = 60000;  // the washer's status is reported only while it is heard
 const int QUEUE_MAX = 120;  // 10 min of 5 s readings
 // Per POST. 24 rows of each kind is ~2.7 KB of JSON at worst, so it always fits reportJson; a full
-// backlog drains in 5 POSTs. Kept small because RAM spent here is RAM the eduroam login can't use.
+// backlog drains in 5 POSTs. Kept small to leave heap for the HTTPS uploads.
 const int SEND_MAX = 24;
 volatile unsigned long reportEveryMs = 30000;  // the server's reply can change this
 
@@ -340,13 +334,13 @@ class MyAdvertisedDeviceCallbacks : public NimBLEScanCallbacks {
 void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
   switch (event) {
     case ARDUINO_EVENT_WIFI_STA_CONNECTED:
-      Serial.println("[WIFI] Associated with an eduroam access point");
+      Serial.printf("[WIFI] Associated with %s\n", WIFI_SSIDS[wifiSsid]);
       break;
 
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
       Serial.println();
       Serial.println("========================================");
-      Serial.println("[WIFI] WiFi connected to eduroam!");
+      Serial.printf("[WIFI] WiFi connected to %s!\n", WIFI_SSIDS[wifiSsid]);
       Serial.print("[WIFI] IP address: ");
       Serial.println(WiFi.localIP());
       Serial.print("[WIFI] Signal strength: ");
@@ -356,7 +350,6 @@ void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
       break;
 
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-      // The EAP login needs a large contiguous block; maxAlloc shows if memory is why it fails.
       Serial.printf("[WIFI] Disconnected. Reason code: %u (heap=%u maxAlloc=%u)\n",
                     info.wifi_sta_disconnected.reason, (unsigned)ESP.getFreeHeap(),
                     (unsigned)ESP.getMaxAllocHeap());
@@ -383,107 +376,46 @@ void fullReset(const char* why) {
   esp_deep_sleep_start();
 }
 
-void connectToEduroam() {
-  Serial.printf("[WIFI] Configuring secure Waterloo eduroam connection... (heap=%u maxAlloc=%u)\n",
-                (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
-  // The radio is shared: no BLE while the EAP login runs. serviceBleScan() restarts both.
-  pBLEScan->stop();
-  pAdvertising->stop();
-
+// Starts a join and returns; maintainWiFiConnection() checks on it.
+void connectToWiFi() {
+  lastWifiAttempt = millis();
   WiFi.mode(WIFI_STA);
-  // Off: the library would retry a rejected eduroam login instantly, over and over, and clash with
-  // maintainWiFiConnection() ("sta is connecting, return error"). That loop retries with backoff instead.
-  WiFi.setAutoReconnect(false);
   WiFi.setTxPower(WIFI_POWER_11dBm);  // halves peak TX current on a shared supply
   // WiFi.onEvent() is registered once in setup(): it has no dedup and would leak here.
-
-  // Use Espressif's trusted CA bundle to validate the authentication server.
-  esp_eap_client_clear_ca_cert();
-
-  esp_err_t bundleResult = esp_eap_client_use_default_cert_bundle(true);
-  Serial.print("[WIFI] Default CA bundle setup: ");
-  Serial.println(esp_err_to_name(bundleResult));
-
-  // Require the authentication server certificate to match Waterloo's server.
-  esp_err_t domainResult = esp_eap_client_set_domain_name(EXPECTED_SERVER_NAME);
-  Serial.print("[WIFI] Server-name validation setup: ");
-  Serial.println(esp_err_to_name(domainResult));
-
-  Serial.println("[WIFI] Connecting to eduroam...");
-
-  WiFi.begin(
-    EDUROAM_SSID,
-    WPA2_AUTH_PEAP,
-    EAP_IDENTITY,
-    EAP_USERNAME,
-    EAP_PASSWORD);
-
-  const unsigned long connectionTimeout = 30000;
-  unsigned long startTime = millis();
-
-  while (WiFi.status() != WL_CONNECTED && millis() - startTime < connectionTimeout) {
-    delay(500);
-    netHeartbeat = millis();  // this wait is expected; it must not trip the stall guard
-    Serial.print(".");
-  }
-
-  Serial.println();
-
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[WIFI] Initial eduroam connection timed out.");
-    Serial.println("[WIFI] The monitor will keep running and retry automatically.");
-  }
+  Serial.printf("[WIFI] Connecting to %s, MAC %s\n", WIFI_SSIDS[wifiSsid], WiFi.macAddress().c_str());
+  WiFi.begin(WIFI_SSIDS[wifiSsid], WIFI_PASSWORD);
 }
 
-void maintainWiFiConnection() {
-  unsigned long currentTime = millis();
+void restartWiFi() {
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  delay(200);
+  connectToWiFi();
+}
 
-  // Serviced here, never inside the HTTP path, so a POST can never nest a 30 s connect.
+// The library retries a dropped connection straight away. If that hasn't worked, this restarts Wi-Fi from
+// scratch at 30 s, then doubling up to every 5 min, for as long as it takes.
+void maintainWiFiConnection() {
+  // Serviced here, never inside the HTTP path.
   if (wifiReinitRequested) {
     wifiReinitRequested = false;
     Serial.println("[WIFI] Upload failures requested a clean re-join.");
-    WiFi.disconnect(true, true);
-    WiFi.mode(WIFI_OFF);
-    delay(200);
-    connectToEduroam();
+    restartWiFi();
     return;
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    wifiIsDown = false;
-    wifiBackoffMs = 15000;
+    lastWifiAttempt = millis();  // so a drop first gets the library's own quick retry
+    wifiRetryMs = WIFI_RETRY_MIN_MS;
     return;
   }
+  if (millis() - lastWifiAttempt < wifiRetryMs) return;
 
-  if (!wifiIsDown) {  // a flag, not a millis()==0 sentinel
-    wifiIsDown = true;
-    wifiDownSince = currentTime;
-  }
-
-  unsigned long downFor = currentTime - wifiDownSince;
-
-  if (currentTime - lastWifiReconnectAttempt < wifiBackoffMs) {
-    return;
-  }
-  lastWifiReconnectAttempt = currentTime;
-
-  // WPA2-Enterprise sessions expire. WiFi.reconnect() alone cannot always redo
-  // the EAP handshake, so escalate to a full stack teardown.
-  if (downFor >= WIFI_HARD_RESET_MS) {
-    Serial.println("[WIFI] Soft reconnect is not recovering. Re-initialising the EAP session...");
-    WiFi.disconnect(true, true);
-    WiFi.mode(WIFI_OFF);
-    delay(200);
-    connectToEduroam();
-  } else {
-    Serial.println("[WIFI] Attempting to reconnect to eduroam...");
-    WiFi.reconnect();
-  }
-
-  // Exponential backoff plus per-node and per-attempt jitter, so a campus-wide
-  // outage cannot make every node on one supply retry and reboot in lockstep.
-  wifiBackoffMs = min(wifiBackoffMs * 2, WIFI_BACKOFF_MAX);
-  wifiBackoffMs += (nodeSalt % 5000) + random(0, 5000);
+  wifiSsid = (wifiSsid + 1) % WIFI_SSID_COUNT;
+  Serial.println("[WIFI] Not connected. Restarting Wi-Fi...");
+  restartWiFi();
+  // Jitter, so nodes on one supply never retry in lockstep.
+  wifiRetryMs = min(wifiRetryMs * 2, WIFI_RETRY_MAX_MS) + random(0, 5000);
 }
 
 bool verifyMpu() {
@@ -587,7 +519,7 @@ void supervisorTask(void* parameter) {
 }
 
 // loop() only samples the MPU now (uploads run in networkTask), so it doesn't need the 8 KB default.
-// Every byte left on the heap is room for the eduroam login. The success log prints the headroom.
+// The success log prints the headroom.
 // Kept here, not at the top: it defines a function, and Arduino puts its prototypes before the first one.
 SET_LOOP_TASK_STACK_SIZE(4096);
 
@@ -668,14 +600,14 @@ void setup() {
 
   pBLEScan = NimBLEDevice::getScan();
   pBLEScan->setScanCallbacks(new MyAdvertisedDeviceCallbacks(), true);  // every packet, not just new devices
-  pBLEScan->setMaxResults(0);  // callback only; never cache results next to eduroam's TLS buffers
+  pBLEScan->setMaxResults(0);  // callback only; never cache results next to the TLS buffers
   pBLEScan->setActiveScan(false);
   pBLEScan->setInterval(160);  // 100 ms
   pBLEScan->setWindow(48);     // 30 ms of it listening
 
   periodStart = millis();
 
-  // WiFi and uploads on core 0, so a slow HTTPS POST or a 30 s eduroam join never pauses the MPU.
+  // WiFi and uploads on core 0, so a slow HTTPS POST or a Wi-Fi restart never pauses the MPU.
   // 8 KB is the stack the HTTPS uploads ran on before they moved out of loop(); the success log
   // prints how much of it is left.
   xTaskCreatePinnedToCore(networkTask, "network", 8192, NULL, 1, NULL, 0);
@@ -720,18 +652,19 @@ void loadSavedConfig() {
 }
 
 // The reply to every report: how often to report, plus saved thresholds if any.
-void applyServerReply(const String& body) {
+// False if the reply isn't the website's own, e.g. a Wi-Fi sign-in page.
+bool applyServerReply(const String& body) {
   JsonDocument doc;
-  if (deserializeJson(doc, body)) return;
+  if (deserializeJson(doc, body) || !doc["success"].as<bool>()) return false;
   if (doc["reportEveryS"].is<int>()) {
     reportEveryMs = constrain(doc["reportEveryS"].as<int>(), 15, 90) * 1000UL;
   }
 
   JsonObject c = doc["config"].as<JsonObject>();
-  if (c.isNull()) return;  // nothing saved on the website: keep current values
+  if (c.isNull()) return true;  // nothing saved on the website: keep current values
   NodeConfig n;
   n.version = c["version"].as<int>();
-  if (n.version <= 0 || n.version == appliedConfigVersion) return;
+  if (n.version <= 0 || n.version == appliedConfigVersion) return true;
   n.dryerOn = c["dryerOnThreshold"].as<float>();
   n.dryerDoor = c["dryerDoorChange"].as<float>();
   n.firstFill = c["washerFirstFill"].as<double>();
@@ -744,7 +677,7 @@ void applyServerReply(const String& body) {
   if (n.dryerOn <= 0 || n.dryerDoor <= 0 || n.firstFill <= 0 || n.refill <= 0 || n.doorDrop <= 0
       || n.refillMs == 0 || n.fullMs == 0 || n.maxCycleMs < n.fullMs || n.refillBands < 1 || n.refillBands > 3) {
     Serial.printf("[CONFIG] Ignored invalid website thresholds v%d\n", n.version);
-    return;
+    return true;
   }
 
   portENTER_CRITICAL(&cfgMux);
@@ -755,6 +688,7 @@ void applyServerReply(const String& body) {
   prefs.putString("node", machineId);
   prefs.putBytes("cfg", &n, sizeof(n));
   Serial.printf("[CONFIG] Now following website thresholds v%d (relaying the washer's)\n", n.version);
+  return true;
 }
 
 // The website shows a version as applied only once the washer follows it too.
@@ -803,8 +737,8 @@ void serviceDryerAdvert() {
 }
 
 // Listening ~30% of the time: each washer packet carries two 5 s rounds, so every
-// round arrives while most of the airtime is left to eduroam. Paused while joining
-// so the EAP login gets the shared radio. Advertising pauses too: the washer only needs it for
+// round arrives while most of the airtime is left to Wi-Fi. Paused while joining
+// so the join gets the shared radio. Advertising pauses too: the washer only needs it for
 // website thresholds, which can't arrive while Wi-Fi is down anyway.
 void serviceBleScan() {
   if (WiFi.status() != WL_CONNECTED) {
@@ -853,7 +787,7 @@ int httpPostJson(const char* url, const char* payload, String* reply) {
 
   http.addHeader("Content-Type", "application/json");
 #ifdef DEVICE_AUTH_TOKEN
-  // Define DEVICE_AUTH_TOKEN in secrets.h once the API checks it. Without this
+  // Define DEVICE_AUTH_TOKEN near the top once the API checks it. Without this
   // anyone who sees one request can set any machine to any state from anywhere.
   http.addHeader("Authorization", "Bearer " DEVICE_AUTH_TOKEN);
 #endif
@@ -950,11 +884,12 @@ bool sendReport(const ReportStatus& st) {
   unsigned long postStart = millis();
   int code = httpPostJson(serverUrl, reportJson, &reply);
   netHeartbeat = millis();
-  if (code >= 200 && code < 500) lastServerReplyAt = millis();  // the website answered, even if it refused
+  // A sign-in page on an open network can answer 200 too; only the website's own reply counts.
+  bool delivered = code >= 200 && code < 300 && applyServerReply(reply);
   // A 4xx is the server refusing this report, so resending it can't help and would block every
   // later status. Its readings are dropped; the status goes out again with the next report.
   bool rejected = code >= 400 && code < 500 && code != 408 && code != 429;
-  if ((code < 200 || code >= 300) && !rejected) {
+  if (!delivered && !rejected) {
     Serial.printf("❌ Report failed: %d (%s) after %lu ms, rssi=%d dBm, maxAlloc=%u, queued d=%d w=%d\n", code,
                   HTTPClient::errorToString(code).c_str(), millis() - postStart, (int)WiFi.RSSI(),
                   (unsigned)ESP.getMaxAllocHeap(), nd, nw);
@@ -978,7 +913,7 @@ bool sendReport(const ReportStatus& st) {
     Serial.printf("❌ Report rejected by the server: %d, dropped d=%d w=%d\n", code, nd, nw);
     return false;
   }
-  applyServerReply(reply);
+  lastServerReplyAt = millis();
   // stack free = the least each task has had spare since boot, in bytes
   Serial.printf("✅ Report %d: d=%d w=%d dryer run=%d empty=%d, washer %s, heap=%u, stack free net=%u loop=%u\n",
                 code, nd, nw, st.dRunning, st.dEmpty,
@@ -1023,7 +958,7 @@ void serviceReports() {
 
 void networkTask(void* parameter) {
   netHeartbeat = millis();
-  connectToEduroam();
+  connectToWiFi();
   for (;;) {
     netHeartbeat = millis();
     maintainWiFiConnection();
@@ -1108,7 +1043,6 @@ void loop() {
 
   publishDryer();
 
-  print_accels();
   delay(50);
 }
 
@@ -1224,12 +1158,4 @@ bool record_mpu_accel() {
     return false;
   }
   return true;
-}
-
-void print_accels() {
-  // Serial.print("Avg10:");
-  // Serial.print(avg10);
-  // Serial.print(",");
-  // Serial.print("ActivitySmall:");
-  // Serial.println(activitysmall);
 }

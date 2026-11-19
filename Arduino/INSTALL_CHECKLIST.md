@@ -42,7 +42,8 @@ values, not another pair's values. Credentials and board settings are shared for
 ## B. Classic ESP32: separate dryer and washer boards
 
 Sketches: [dryer_bluer.ino](dryer_bluer/dryer_bluer.ino) and
-[washer_bluer.ino](washer_bluer/washer_bluer.ino). The dryer connects to eduroam and relays the washer's BLE
+[washer_bluer.ino](washer_bluer/washer_bluer.ino). The dryer connects to the open "UniversityOfWaterloo"
+Wi-Fi and relays the washer's BLE
 status and readings; the washer uses BLE only. Flash both boards of each pair together because the older
 firmware uses a different BLE format. Use these main sketches, not the nested `*_no_live` versions.
 
@@ -54,19 +55,43 @@ firmware uses a different BLE format. Use these main sketches, not the nested `*
 | Partition Scheme | **Minimal SPIFFS (1.9MB APP with OTA)** | **Default** |
 | Port | Attached dryer's port | Attached washer's port |
 
-- [ ] Flash Mode / Flash Frequency: leave at the board defaults. They only set how fast the chip reads its
-  own program and were not the eduroam fix. The partition scheme is the setting that matters
-- [ ] eduroam (codes 4, 23, 202): Dryer 2 joined, then dropped after ~2 h and its re-login kept failing.
-  The Nov 4 build frees ~14 KB of RAM (smaller upload batches and buffer, smaller task stacks) and pauses
-  BLE while joining; it ran 15+ h at SJU. On site (Nov 20): confirm each board joins and reports, and
-  through its first automatic restart. If one keeps failing where another works, power it off for
-  15-30 min, retry, then swap in a backup board
+- [ ] Flash Mode / Flash Frequency: leave at the board defaults. The partition scheme is the setting that matters
+- [ ] **Wi-Fi allow list (before flashing).** The dryers no longer use eduroam. They join the open
+  "UniversityOfWaterloo" network, which only lets in MAC addresses IST has allow-listed. Read every dryer
+  board's MAC and every spare's (`esptool.exe --port COMx read-mac`, or the `MAC` line the dryer prints at boot
+  and that an upload prints), then send them through the IST Service Desk online portal live chat (or email
+  helpdesk@uwaterloo.ca). In the Nov 18 chat, IST said this usually takes about 2 minutes and is easy to do.
+  Washers need no allow-listing (BLE only). A replacement board needs the same request with its MAC. Flash only
+  once IST confirms the addresses are added. "UniversityOfWaterloo" is the confirmed network name in the SJU
+  laundry room.
+  Allow-list processing may be quick, but devices can take 30-60 minutes to connect successfully afterward;
+  occasionally it can take up to 24 hours. Leave them powered and let them retry. If they are still offline
+  after 24 hours, confirm the MACs and network name with IST before reflashing.
+  Nov 18 test: dryer 2 reported straight after flashing. Dryer 1 joined but its reports were refused for 4 min,
+  until its automatic re-join after 5 failed reports; then it reported normally. So a board that joins but
+  can't report at first should be left alone to recover.
+
+  Example live-chat request (update the device list as you collect more MACs):
+
+  > Hello, I had a live chat earlier today with Elias about the laundry solution at SJU. Please add these
+  > devices to the UniversityOfWaterloo wireless Wi-Fi allow list for one year.
+  >
+  > I was told to provide this information:
+  >
+  > Name: Oliver Simser
+  > WatIAM username: osimser
+  > Devices (laundry sensors, SJU laundry room):
+  > Device 1: 70:4b:ca:99:62:a0
+  > Device 2: b4:bf:e9:05:01:14
+- [ ] **Renew the allow list before it expires** (1 year max). Put a reminder in your calendar a couple of weeks
+  before. If it lapses the dryers go offline, keep retrying and resetting every 10 min, and come back by
+  themselves within about 10 min of being re-added; no reflash needed
+- [ ] Delete old `secrets.h` copies (they hold an eduroam password); the dryer no longer uses them
 - [ ] The dryer does not fit the default app partition. The OTA partition reserves space only; it does not
   mean remote firmware updates are implemented
 - [ ] Leave other board options at the board defaults unless the actual hardware requires otherwise;
   select its real flash size. Do not copy S3 USB CDC settings to classic ESP32 boards
-- [ ] Dryer only: put `secrets.h` in the dryer sketch folder with real `EAP_USERNAME` and `EAP_PASSWORD`.
-  The washer needs no WiFi credentials. Never commit secrets, build output or flash dumps
+- [ ] The washer needs no Wi-Fi settings. Never commit build output or flash dumps
 - [ ] Verify/compile both in Arduino IDE before uploading. Compilation of the latest refill-mode-3 changes
   has not yet been confirmed; do not treat the earlier hung CLI attempt as a successful build
 - [ ] Check boot logs after upload. Avoid erasing all flash unless intentionally clearing saved settings;
@@ -107,7 +132,10 @@ website, are relayed through the dryer and are saved across restarts; built-in d
   check the Serial Monitor shows `[SUPERVISOR] Full reset` after 10 min and it reconnects and reports (reset
   reason 8) when Wi-Fi is back
 - [ ] Test Wi-Fi recovery on the home-test build: turn the router off for 1 min, then on. The node should
-  print "Attempting to reconnect" (no "sta is connecting, return error") and report again within about a minute
+  print "Not connected. Restarting Wi-Fi..." and report again within about a minute of the router being back
+- [ ] Optional: if you have a hotspot that can run with no password, set `WIFI_SSIDS` to its name and
+  `WIFI_PASSWORD` to `""` to try the exact open-network join. If it needs a password (iPhones do), skip this:
+  home Wi-Fi runs the same code, and open versus password is handled inside the Wi-Fi library
 - [ ] Record existing per-machine settings before flashing; use [MACHINES.md](MACHINES.md) as the registry
 - [ ] Open `/test/nodes` for each pair: save if not saved before, otherwise review the existing values.
   Confirm the applied version after both sensors/boards are online; do not overwrite individual tuning
@@ -240,26 +268,35 @@ Use `plot_dryer_washer.py` (or the live readings page, section 7). Write the num
   A retry replaces, never duplicates, what the server already stored.
 - A machine shows offline after 3 missed reports (2 min). The interval is `REPORT_EVERY_S` in
   `dashboard/api/diagnostics.js`: changing it needs a deploy, not a reflash.
-- Readings are auto-deleted after 3 days. The graph shows the last 2.5 min of the last 30 min fetched and
-  stays where it is when readings stop.
+- Readings are auto-deleted after 3 days. The graph shows 2.5 min at a time, with a slider back through the
+  last 10 min; slid fully right it follows new readings.
 - Older firmware keeps working during the rollout (5 min heartbeat, 15 min offline), but flash both boards of
   a pair together.
+
+**Why the dryers use open campus Wi-Fi instead of eduroam (Nov 17-18, 2026):**
+- eduroam needs a personal login on every board. All 10 shared one account, and freshly restarted boards were
+  intermittently refused (reason 23) for 10-30 min at a time while the others stayed on. The login also needs a
+  large block of memory, which caused the earlier 23/202 failures, and an outside server we couldn't see into.
+- Instead of more firmware workarounds (a second account, slower retries), I asked the network owner. IST
+  (live chat, Nov 18) recommended the "UniversityOfWaterloo" network with the boards' MACs on an allow list.
+- Result: no login server that can refuse the boards, no personal password stored on them, about 100 KB less
+  firmware, less memory used, and simpler Wi-Fi code. If the allow list lapses, the boards recover by
+  themselves once re-added.
 
 **Automatic recovery:**
 - Both classic ESP32 sketches schedule an idle restart after 24-30 hours and a 7-day absolute restart cap.
   An active cycle can defer the idle restart. Watchdogs and sensor recovery are additional backstops,
   not a guarantee of unattended operation or a replacement for mounting inspections.
-- The dryer first retries on its own: a Wi-Fi re-join after 5 failed reports, and a full Wi-Fi restart after
-  3 min offline. These restart only the Wi-Fi, so a fault in the rest of the chip survives them.
+- The dryer first retries on its own: the Wi-Fi library reconnects straight away after a drop; if that hasn't
+  worked, the dryer restarts Wi-Fi from scratch after 30 s, then 1, 2, 4, and every 5 min. It also re-joins
+  after 5 failed reports. These restart only the Wi-Fi, so a fault in the rest
+  of the chip survives them.
 - Last resort, added after node 2 stayed powered but silent for 4 days in Nov 2026 until it was unplugged: if no
   report has reached the website for 10 min, the dryer fully resets itself with a 1 s deep sleep. That powers
   down the radio and most of the chip, the closest software gets to unplugging it, and it doesn't wait for the
-  dryer to be idle. On `/test` the reset reason shows as "deep sleep (8)". During a real eduroam or website
-  outage nodes reset every 10 min until it's back, which is harmless.
-- eduroam sometimes rejects a correct login (reason 23 in the Serial Monitor), even right after a fresh flash;
-  dryers 1 and 2 did this on Nov 17. Retrying in the same session often keeps failing; the full reset fixed
-  dryer 1 on its own. So after flashing, if a node shows reason 23, don't reflash or change settings: wait up
-  to 10 min for it to reset and join. Reflashing repeatedly only adds more failed logins to the account.
+  dryer to be idle. On `/test` the reset reason shows as "deep sleep (8)". During a Wi-Fi or website outage, or
+  while off the allow list, nodes reset every 10 min until it's back, which is harmless. Only a real reply from
+  the website counts, so a Wi-Fi sign-in page can't stop the resets.
 - **What isn't covered:** a board whose hardware is genuinely failing, so that even the deep reset doesn't help
   and only cutting power does. If that happens you'll see "deep sleep (8)" resets every 10 min on `/test` with
   no reports between them. That's the signal to swap the board, which is why replacing node 2's power supply

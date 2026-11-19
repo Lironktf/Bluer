@@ -223,10 +223,11 @@ function Recording({ nodeId, lock }) {
 
   const toggle = async () => {
     setBusy(true);
-    const { ok, data } = await adminFetch('kind=recording', {
+    const { ok, status, data } = await adminFetch('kind=recording', {
       method: 'POST',
       body: { nodeId, action: active ? 'stop' : 'start' },
     });
+    if (status === 401) return lock();
     setError(ok ? null : data?.error || 'Could not change the recording');
     await load();
     setBusy(false);
