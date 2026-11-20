@@ -7,7 +7,9 @@ Choose one hardware path per pair. Shared power, mounting, testing and handover 
 ## A. ESP32-S3: one combined board per pair
 
 Sketch: [dryer_and_washer_bluer.ino](dryer_and_washer_bluer/dryer_and_washer_bluer.ino).
-One board reads both sensors and uploads both machines over eduroam; no BLE pairing.
+One board reads both sensors and uploads both machines over the open "UniversityOfWaterloo" Wi-Fi, with its MAC
+on the IST allow list like the dryers (section B); no BLE pairing. Its Wi-Fi, reports, live readings and
+automatic recovery work exactly like the classic dryer's (section 7).
 
 ### Upload settings
 
@@ -15,8 +17,7 @@ One board reads both sensors and uploads both machines over eduroam; no BLE pair
 - [ ] Flash Size: **4MB only for a board confirmed to have 4MB**; otherwise select its actual flash size
 - [ ] Partition Scheme: **Minimal SPIFFS (1.9MB APP with OTA)**; this reserves space but does not implement OTA
 - [ ] Select the attached board's port and use a USB data cable
-- [ ] Put `secrets.h` in this sketch's folder, defining `EAP_USERNAME` and `EAP_PASSWORD` with real eduroam
-  credentials. Never commit it, build output or flash dumps
+- [ ] Board's MAC on the UniversityOfWaterloo allow list (see section B) before flashing
 - [ ] Verify/compile in Arduino IDE before uploading, then check boot logs and sensor readings
 
 ### What changes per pair N
@@ -29,7 +30,7 @@ One board reads both sensors and uploads both machines over eduroam; no BLE pair
 Replace N with the machine sticker number, 1-10. These are the required per-pair code changes.
 Other `VARIES` threshold lines are fallback defaults: tune the actual pair through `/test/nodes`, using
 [MACHINES.md](MACHINES.md) as the starting reference. If offline fallback tuning is required, use that pair's
-values, not another pair's values. Credentials and board settings are shared for identical boards.
+values, not another pair's values. Board settings are shared for identical boards.
 
 ### Wiring and supplies
 
@@ -67,9 +68,7 @@ firmware uses a different BLE format. Use these main sketches, not the nested `*
   Allow-list processing may be quick, but devices can take 30-60 minutes to connect successfully afterward;
   occasionally it can take up to 24 hours. Leave them powered and let them retry. If they are still offline
   after 24 hours, confirm the MACs and network name with IST before reflashing.
-  Nov 18 test: dryer 2 reported straight after flashing. Dryer 1 joined but its reports were refused for 4 min,
-  until its automatic re-join after 5 failed reports; then it reported normally. So a board that joins but
-  can't report at first should be left alone to recover.
+  A board that joins but can't report at first usually recovers by itself within minutes: leave it alone.
 
   Example live-chat request (update the device list as you collect more MACs):
 
@@ -86,14 +85,12 @@ firmware uses a different BLE format. Use these main sketches, not the nested `*
 - [ ] **Renew the allow list before it expires** (1 year max). Put a reminder in your calendar a couple of weeks
   before. If it lapses the dryers go offline, keep retrying and resetting every 5 min, and come back by
   themselves within about 5 min of being re-added; no reflash needed
-- [ ] Delete old `secrets.h` copies (they hold an eduroam password); the dryer no longer uses them
 - [ ] The dryer does not fit the default app partition. The OTA partition reserves space only; it does not
   mean remote firmware updates are implemented
 - [ ] Leave other board options at the board defaults unless the actual hardware requires otherwise;
   select its real flash size. Do not copy S3 USB CDC settings to classic ESP32 boards
 - [ ] The washer needs no Wi-Fi settings. Never commit build output or flash dumps
-- [ ] Verify/compile both in Arduino IDE before uploading. Compilation of the latest refill-mode-3 changes
-  has not yet been confirmed; do not treat the earlier hung CLI attempt as a successful build
+- [ ] Verify/compile both in Arduino IDE before uploading
 - [ ] Check boot logs after upload. Avoid erasing all flash unless intentionally clearing saved settings;
   if erased, recheck the website configuration is received and applied
 
@@ -118,8 +115,12 @@ website, are relayed through the dryer and are saved across restarts; built-in d
 
 - [ ] Dryer MPU6050: SDA **21**, SCL **22**, AD0 **GND**, VCC **3V3**, common GND
 - [ ] Washer INMP441: SCK **26**, WS **25**, SD **33**, L/R **GND**, VDD **3V3**, common GND
-- [ ] For 10 pairs: power 20 boards independently with certified, regulated 5 V supplies and cables matching
-  each board's USB connector (check Micro-USB versus USB-C before buying)
+- [ ] **Power, one supply per pair** (the tested setup): one 5 V 2 A wall adapter powers only that pair's dryer
+  and its own washer:
+  wall adapter (5.5x2.1 mm plug) -> 5.5x2.1 female to 5.5x2.5 male adapter -> 1-to-2 splitter (5.5x2.5 mm)
+  -> two 1.5 m DC extension cables (5.5x2.5 mm) -> DC to USB-C adapters -> dryer board and washer board.
+  Never share a supply between pairs: on a 4-way splitter feeding two pairs, dryer 2 crashed and froze
+  repeatedly (Nov 18); split two ways with only its washer, it ran all night with no restarts (Nov 19-20)
 - [ ] Label each enclosure with its machine ID and pair number
 - [ ] Confirm the dryer receives its own washer, including mic health, and no neighbouring pair
 
@@ -133,15 +134,12 @@ website, are relayed through the dryer and are saved across restarts; built-in d
   reason 8) when Wi-Fi is back
 - [ ] Test Wi-Fi recovery on the home-test build: turn the router off for 1 min, then on. The node should
   print "Not connected. Restarting Wi-Fi..." and report again within about a minute of the router being back
-- [ ] Optional: if you have a hotspot that can run with no password, set `WIFI_SSIDS` to its name and
-  `WIFI_PASSWORD` to `""` to try the exact open-network join. If it needs a password (iPhones do), skip this:
-  home Wi-Fi runs the same code, and open versus password is handled inside the Wi-Fi library
 - [ ] Record existing per-machine settings before flashing; use [MACHINES.md](MACHINES.md) as the registry
 - [ ] Open `/test/nodes` for each pair: save if not saved before, otherwise review the existing values.
   Confirm the applied version after both sensors/boards are online; do not overwrite individual tuning
   with generic defaults. Test refill modes 1 (lower band), 2 (either), and 3 (upper band) where needed
-- [ ] Pack the supplies/cables for the chosen hardware path, plus spares, including extra wall plugs (USB
-  power adapters)
+- [ ] Pack one power set per pair (section B "Wiring and supplies": 5 V 2 A adapter, 2.1-to-2.5 adapter,
+  1-to-2 splitter, two extension cables, two DC to USB-C adapters), plus spares of each part
 - [ ] Tape (section 3), cable clips, cable ties, secondary restraints, "BLUER - DO NOT UNPLUG" labels
 - [ ] Foam between machines (section 3), only with facilities' approval. Cheapest option: a roll of
   self-adhesive foam or EPDM rubber weatherstripping (hardware store door/window aisle, about 1/4" thick)
@@ -152,7 +150,8 @@ website, are relayed through the dryer and are saved across restarts; built-in d
 
 ### 2. Power and cables (the most common failure so far)
 
-- [ ] One supply per node, plugged straight into the wall (no shared hubs, no DC extenders)
+- [ ] One 5 V 2 A wall adapter per pair, split two ways to that pair's dryer and washer only, as in section B
+  "Wiring and supplies". No 4-way splitters and no supply shared between pairs
 - [ ] Cable long enough that with the machine pulled fully out there is still slack
 - [ ] With the machine pushed back, the cable sits in a fixed spot: clipped every 20-30 cm, nowhere near moving
       parts, the exhaust, or anything that vibrates against it (that causes false readings)
@@ -195,7 +194,7 @@ website, are relayed through the dryer and are saved across restarts; built-in d
 
 ### 4. Graph testing (per pair, before leaving that pair)
 
-Use `plot_dryer_washer.py` (or the live readings page, section 7). Write the numbers down for each pair.
+Use the live readings page (`/test/live`, section 7). Write the numbers down for each pair.
 
 **Testing day:**
 - [ ] Right after flashing each node, start a recording for that pair on `/test/live`
@@ -257,21 +256,21 @@ Use `plot_dryer_washer.py` (or the live readings page, section 7). Write the num
 - Both hardware paths support these settings. With two classic ESP32s, the dryer forwards washer settings
   over BLE; check the applied acknowledgement, not just whether the website saved the values.
 
-**Reports and live readings (always on, classic ESP32 pair):**
+**Reports and live readings (always on, both hardware paths):**
 - The dryer sends one report every 30 s, and sooner (at most every 5 s) when either machine's running/empty
   changes. Each report carries both machines' status for the website and every 5 s reading since the last one.
+  At 30 s, 10 nodes use about 93% of Vercel Hobby's 1M function calls a month. Check Vercel's Usage page once
+  all 10 run; if it's close, raise `REPORT_EVERY_S` (60 s halves it; no reflash, readings are still all sent).
 - Every 5 s, the dryer keeps the highest `avg10` and the biggest 0.15 s door jump; the washer keeps the highest
   value of each water band and the biggest door-band drop. Both keep running/empty at the end of the 5 s.
 - The washer broadcasts its last two 5 s rounds, so the dryer can miss Bluetooth for several seconds without
   losing a reading. Washer points may sit up to ~5 s off the dryer's on the graph.
 - A failed report is retried after 5, 10, 20... up to 60 s, with everything still queued (up to 10 min).
-  A retry replaces, never duplicates, what the server already stored.
+  A retry replaces, never duplicates, what the server already stored. Readings stay queued on any failure.
 - A machine shows offline after 3 missed reports (2 min). The interval is `REPORT_EVERY_S` in
   `dashboard/api/diagnostics.js`: changing it needs a deploy, not a reflash.
 - Readings are auto-deleted after 3 days. The graph shows 2.5 min at a time, with a slider back through the
   last 10 min; slid fully right it follows new readings.
-- Older firmware keeps working during the rollout (5 min heartbeat, 15 min offline), but flash both boards of
-  a pair together.
 
 **Why the dryers use open campus Wi-Fi instead of eduroam (Nov 17-18, 2026):**
 - eduroam needs a personal login on every board. All 10 shared one account, and freshly restarted boards were
@@ -283,8 +282,16 @@ Use `plot_dryer_washer.py` (or the live readings page, section 7). Write the num
   firmware, less memory used, and simpler Wi-Fi code. If the allow list lapses, the boards recover by
   themselves once re-added.
 
-**Automatic recovery:**
-- Both classic ESP32 sketches schedule an idle restart after 24-30 hours and a 7-day absolute restart cap.
+**Full Wi-Fi transmit power (Nov 19-20, 2026):**
+- The dryers see the network at only about -77 dBm. They used to transmit at 11 dBm to limit current spikes on
+  shared supplies; now they use the maximum, 19.5 dBm. The same night, dryer 2 at full power went silent for
+  2 min or more about 4 times, against 19 for dryer 1 at 11 dBm.
+- Full power draws more current in short bursts, which a 5 V 2 A supply split between one dryer and its washer
+  handles fine. Gaps that remain are mostly the busy residence network (about 10 pm to 1:30 am): readings stay
+  queued and fill in afterwards, and the 5 min reset ends long ones.
+
+**Automatic recovery** (the classic dryer and the ESP32-S3 combined board work the same way):
+- Every sketch schedules an idle restart after 24-30 hours and a 7-day absolute restart cap.
   An active cycle can defer the idle restart. Watchdogs and sensor recovery are additional backstops,
   not a guarantee of unattended operation or a replacement for mounting inspections.
 - The dryer first retries on its own: the Wi-Fi library reconnects straight away after a drop; if that hasn't
@@ -299,8 +306,8 @@ Use `plot_dryer_washer.py` (or the live readings page, section 7). Write the num
   the website counts, so a Wi-Fi sign-in page can't stop the resets.
 - **What isn't covered:** a board whose hardware is genuinely failing, so that even the deep reset doesn't help
   and only cutting power does. If that happens you'll see "deep sleep (8)" resets every 5 min on `/test` with
-  no reports between them. That's the signal to swap the board, which is why replacing node 2's power supply
-  and cable on the day is still worth doing.
+  no reports between them. Check power first (section 2): dryer 2's crashes and freezes in Nov 2026 were its
+  shared 4-way supply. If it continues on the standard per-pair power, swap the board.
 
 **Weekly email check:**
 - [ ] Script that reviews the week's test history and emails only on a serious issue: a node offline for hours,

@@ -31,7 +31,7 @@ function getRoomFromMachineId(machineId) {
 }
 
 // Machine goes offline if it misses several heartbeats. Older firmware reports every 5 min,
-// so 15 min; nodes on the 30 s reports store reportEveryS and go offline after 3 missed reports.
+// so 15 min; nodes on the v2 reports store reportEveryS and go offline after 3 missed reports.
 const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
 const MISSED_HEARTBEATS_BEFORE_OFFLINE = 3;
 const OFFLINE_TIMEOUT_MS = HEARTBEAT_INTERVAL_MS * MISSED_HEARTBEATS_BEFORE_OFFLINE;
