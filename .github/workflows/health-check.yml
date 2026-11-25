@@ -15,7 +15,6 @@ on:
 permissions:
   contents: write  # commit the summary
   issues: write    # the alert (GitHub emails it to NOTIFY_USER)
-  models: read     # AI summary through GitHub Models
 
 concurrency:
   group: health-check
@@ -48,6 +47,8 @@ jobs:
         working-directory: dashboard
         env:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          MONGODB_DB: LaunDryer
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NOTIFY_USER: OliverSimser
         run: node scripts/healthCheck.js
