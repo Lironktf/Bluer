@@ -47,7 +47,7 @@ function offlineAfterMs(machine) {
 const DIAGNOSTIC_MACHINE_IDS = Array.from({ length: 10 }, (_, i) => [`sj-w${i + 1}`, `sj-d${i + 1}`]).flat();
 
 // A heartbeat with nothing new is still recorded this often, to show the node is alive.
-const DIAGNOSTIC_CHECKIN_MS = 3 * 60 * 60 * 1000;
+const DIAGNOSTIC_CHECKIN_MS = 12 * 60 * 60 * 1000;
 
 /**
  * Saves one machine's status, a history record when it changed, and a /test/history record
