@@ -36,7 +36,9 @@ const NO_CYCLES_LOOKBACK_MS = 3 * DAY;
 // Pairs checked by every rule. To monitor all boards: Array.from({ length: 10 }, (_, i) => i + 1)
 const PAIRS = [1, 2];
 const TZ = 'America/Toronto';
-const AI_MODELS = (process.env.AI_MODEL || 'gemini-2.5-flash,gemini-2.5-flash-lite').split(',').map((m) => m.trim());
+// The -latest aliases follow Google's current Flash models, so they survive model retirements.
+const AI_MODELS = (process.env.AI_MODEL || 'gemini-flash-latest,gemini-3.8-flash,gemini-flash-lite-latest,gemini-3.5-flash-lite')
+  .split(',').map((m) => m.trim());
 const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta';
 
 // Everything that can trigger an alert. Change a number here to make a rule stricter or looser.
@@ -581,18 +583,24 @@ async function geminiCall(path, key, body) {
   } catch {
     // handled below
   }
-  if (!res.ok || !json) throw new Error(`${res.status} ${text.slice(0, 300)}`);
+  if (!res.ok || !json) throw Object.assign(new Error(`${res.status} ${text.slice(0, 300)}`), { status: res.status, body: text });
   return json;
 }
 
-// Google retires model names over time; if the named ones are gone, use whichever Flash models exist now.
+const sleep = (msDelay) => new Promise((resolve) => setTimeout(resolve, msDelay));
+
+// Standard "gemini-<version>-flash" / "-flash-lite" models only, newest first, full Flash before Lite.
 async function currentFlashModels(key) {
   const { models = [] } = await geminiCall('models?pageSize=200', key);
+  const rank = (name) => {
+    const m = /^gemini-(\d+(?:\.\d+)?)-flash(-lite)?$/.exec(name);
+    return m ? Number(m[1]) * 10 - (m[2] ? 1 : 0) : -1;
+  };
   return models
     .filter((m) => m.supportedGenerationMethods?.includes('generateContent'))
     .map((m) => m.name.replace(/^models\//, ''))
-    .filter((name) => /flash/.test(name) && !/image|tts|audio|live|embed|thinking|exp/.test(name))
-    .sort((a, b) => Number(/preview/.test(a)) - Number(/preview/.test(b)) || b.localeCompare(a, undefined, { numeric: true }))
+    .filter((name) => rank(name) >= 0)
+    .sort((a, b) => rank(b) - rank(a))
     .slice(0, 3);
 }
 
@@ -610,20 +618,31 @@ async function aiSummary(payload) {
 
   const tried = new Set();
   const tryModels = async (models) => {
-    for (const model of models) {
+    const queue = [...models];
+    while (queue.length) {
+      const model = queue.shift();
       if (tried.has(model)) continue;
       tried.add(model);
-      try {
-        const json = await geminiCall(`models/${model}:generateContent`, key, request);
-        const text = (json.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('').trim()
-          .replace(/^```(?:markdown)?\s*|\s*```$/g, '');
-        if (text.startsWith('### Verdict')) {
-          console.log(`AI summary written by ${model}.`);
-          return text;
+      // Busy (503) or rate-limited (429): wait and retry the same model twice before moving on.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const json = await geminiCall(`models/${model}:generateContent`, key, request);
+          const text = (json.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('').trim()
+            .replace(/^```(?:markdown)?\s*|\s*```$/g, '');
+          if (text.startsWith('### Verdict')) {
+            console.log(`AI summary written by ${model}.`);
+            return text;
+          }
+          console.error(`AI model ${model} returned an unexpected format (finish reason ${json.candidates?.[0]?.finishReason ?? 'unknown'}).`);
+          break;
+        } catch (error) {
+          console.error(`AI model ${model} failed: ${error.message}`);
+          // A retired model's error names its replacement ("use models/gemini-..."): try that next.
+          const replacement = error.status === 404 && /use (?:models\/)?(gemini-[\w.-]*\w)/i.exec(error.body || '');
+          if (replacement && !tried.has(replacement[1])) queue.unshift(replacement[1]);
+          if (![429, 503].includes(error.status) || attempt === 2) break;
+          await sleep((attempt + 1) * 15000);
         }
-        console.error(`AI model ${model} returned an unexpected format (finish reason ${json.candidates?.[0]?.finishReason ?? 'unknown'}).`);
-      } catch (error) {
-        console.error(`AI model ${model} failed: ${error.message}`);
       }
     }
     return null;
