@@ -7,7 +7,7 @@
  * 2. Reads the last 2 days from MongoDB and works out the numbers for every pair.
  * 3. Fixed rules (RULES) decide what counts as a problem. Only they can trigger an alert;
  *    the AI cannot add or remove problems.
- * 4. An AI model (GitHub Models, free with the workflow's own token) writes the summary.
+ * 4. Google's Gemini (free tier, GEMINI_API_KEY) writes the summary.
  *    If it fails, a plain summary is written instead.
  * 5. Appends the summary to health/HEALTH_SUMMARIES.md (the workflow commits it) and, only if there
  *    are problems, opens a GitHub issue that @mentions you, which GitHub emails to you.
@@ -36,7 +36,8 @@ const NO_CYCLES_LOOKBACK_MS = 3 * DAY;
 // Pairs checked by every rule. To monitor all boards: Array.from({ length: 10 }, (_, i) => i + 1)
 const PAIRS = [1, 2];
 const TZ = 'America/Toronto';
-const AI_MODELS = (process.env.AI_MODEL || 'openai/gpt-4.1,openai/gpt-4o-mini').split(',');
+const AI_MODELS = (process.env.AI_MODEL || 'gemini-2.5-flash,gemini-2.5-flash-lite').split(',').map((m) => m.trim());
+const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta';
 
 // Everything that can trigger an alert. Change a number here to make a rule stricter or looser.
 const RULES = {
@@ -567,36 +568,75 @@ CAUSES (cause; action) BY FINDING TYPE
 - low_memory: possible firmware memory leak; note it for the developer (the daily restart clears it).
 - prank: many machines reported broken at once, probably a prank; check the flags on the website.`;
 
-async function aiSummary(payload) {
-  const token = process.env.GITHUB_TOKEN;
-  if (!token) return null;
-  for (const model of AI_MODELS) {
-    try {
-      const res = await fetch('https://models.github.ai/inference/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          model: model.trim(),
-          temperature: 0.2,
-          max_tokens: 2000,
-          messages: [
-            { role: 'system', content: AI_INSTRUCTIONS },
-            { role: 'user', content: JSON.stringify(payload) },
-          ],
-        }),
-      });
-      if (!res.ok) {
-        console.error(`AI model ${model} failed: ${res.status} ${(await res.text()).slice(0, 300)}`);
-        continue;
-      }
-      const text = (await res.json()).choices?.[0]?.message?.content?.trim().replace(/^```(?:markdown)?\s*|\s*```$/g, '');
-      if (text?.startsWith('### Verdict')) return text;
-      console.error(`AI model ${model} returned an unexpected format; trying the next one.`);
-    } catch (error) {
-      console.error(`AI model ${model} failed:`, error.message);
-    }
+async function geminiCall(path, key, body) {
+  const res = await fetch(`${GEMINI_API}/${path}`, {
+    method: body ? 'POST' : 'GET',
+    headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  let json = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    // handled below
   }
-  return null;
+  if (!res.ok || !json) throw new Error(`${res.status} ${text.slice(0, 300)}`);
+  return json;
+}
+
+// Google retires model names over time; if the named ones are gone, use whichever Flash models exist now.
+async function currentFlashModels(key) {
+  const { models = [] } = await geminiCall('models?pageSize=200', key);
+  return models
+    .filter((m) => m.supportedGenerationMethods?.includes('generateContent'))
+    .map((m) => m.name.replace(/^models\//, ''))
+    .filter((name) => /flash/.test(name) && !/image|tts|audio|live|embed|thinking|exp/.test(name))
+    .sort((a, b) => Number(/preview/.test(a)) - Number(/preview/.test(b)) || b.localeCompare(a, undefined, { numeric: true }))
+    .slice(0, 3);
+}
+
+async function aiSummary(payload) {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) {
+    console.error('GEMINI_API_KEY is not set; writing the plain summary.');
+    return null;
+  }
+  const request = {
+    systemInstruction: { parts: [{ text: AI_INSTRUCTIONS }] },
+    contents: [{ role: 'user', parts: [{ text: JSON.stringify(payload) }] }],
+    generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+  };
+
+  const tried = new Set();
+  const tryModels = async (models) => {
+    for (const model of models) {
+      if (tried.has(model)) continue;
+      tried.add(model);
+      try {
+        const json = await geminiCall(`models/${model}:generateContent`, key, request);
+        const text = (json.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('').trim()
+          .replace(/^```(?:markdown)?\s*|\s*```$/g, '');
+        if (text.startsWith('### Verdict')) {
+          console.log(`AI summary written by ${model}.`);
+          return text;
+        }
+        console.error(`AI model ${model} returned an unexpected format (finish reason ${json.candidates?.[0]?.finishReason ?? 'unknown'}).`);
+      } catch (error) {
+        console.error(`AI model ${model} failed: ${error.message}`);
+      }
+    }
+    return null;
+  };
+
+  const text = await tryModels(AI_MODELS);
+  if (text) return text;
+  try {
+    return await tryModels(await currentFlashModels(key));
+  } catch (error) {
+    console.error(`Listing Gemini models failed: ${error.message}`);
+    return null;
+  }
 }
 
 // ---------- Output ----------
@@ -665,7 +705,7 @@ async function main() {
   }
 
   const dotenv = await import('dotenv');
-  dotenv.config({ path: join(__dirname, '..', '.env') });
+  dotenv.config({ path: join(__dirname, '..', '.env'), quiet: true });
   const { connectToDatabase } = await import('../api/lib/mongodb.js');
   const { effectiveThresholds } = await import('../api/diagnostics.js');
   const dryRun = ['1', 'true'].includes(process.env.DRY_RUN);
