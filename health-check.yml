@@ -1,0 +1,66 @@
+name: Laundry health check
+
+# Runs daily; the script only does the work when the newest summary in health/HEALTH_SUMMARIES.md
+# is 4+ days old. "Run workflow" with "force" ticked runs it now.
+on:
+  schedule:
+    - cron: '0 13 * * *'  # 13:00 UTC = 8 am Waterloo in winter, 9 am in summer
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Run the analysis now, even if the last summary is under 4 days old
+        type: boolean
+        default: false
+
+permissions:
+  contents: write  # commit the summary
+  issues: write    # the alert (GitHub emails it to NOTIFY_USER)
+  models: read     # AI summary through GitHub Models
+
+concurrency:
+  group: health-check
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FORCE: ${{ inputs.force && '1' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Is it due?
+        id: due
+        working-directory: dashboard
+        run: node scripts/healthCheck.js --check-due
+
+      - name: Install
+        if: steps.due.outputs.due == 'true'
+        working-directory: dashboard
+        run: npm ci --omit=dev --no-audit --no-fund
+
+      - name: Health check
+        if: steps.due.outputs.due == 'true'
+        working-directory: dashboard
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTIFY_USER: OliverSimser
+        run: node scripts/healthCheck.js
+
+      # Also runs if the alert failed, so a written summary is never lost.
+      - name: Save summary
+        if: ${{ !cancelled() && steps.due.outputs.due == 'true' }}
+        run: |
+          [ -f health/HEALTH_SUMMARIES.md ] || exit 0
+          git add health/HEALTH_SUMMARIES.md
+          git diff --cached --quiet && exit 0
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Health summary'
+          git pull --rebase
+          git push
