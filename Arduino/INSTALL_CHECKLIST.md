@@ -82,6 +82,27 @@ firmware uses a different BLE format. Use these main sketches, not the nested `*
   > Devices (laundry sensors, SJU laundry room):
   > Device 1: 70:4b:ca:99:62:a0
   > Device 2: b4:bf:e9:05:01:14
+
+  Allow-listed dryer board MACs (10, Nov 2026). Which board goes on which dryer isn't decided yet; it's set at
+  the final install. Send this whole list when renewing, plus any spares or replacements:
+
+  | # | MAC |
+  |---|---|
+  | currently sj-d1 | 70:4b:ca:99:62:a0 |
+  | currently sj-d2 | b4:bf:e9:05:01:14 |
+  | currently sj-w1 | b4:bf:e9:04:f9:1c |
+  | currently sj-w2 | ec:e3:34:45:e9:5c |
+  | home | b4:bf:e9:05:01:4c |
+  | home | 30:76:f5:f0:50:10 |
+  | home | b4:bf:e9:05:cf:10 |
+  | home | b4:bf:e9:00:fe:c0 |
+  | home | b4:bf:e9:05:0b:a0 |
+  | home | 00:70:07:0e:23:2c |
+
+  Allow-list dates. The automatic health check reads these lines (keep the `Allow-listed: YYYY-MM-DD` format):
+  update a date when you renew that batch, and add a line for each new batch.
+  - Allow-listed: 2026-11-18 (first 2 rows)
+  - Allow-listed: 2026-11-19 (other 8 rows)
 - [ ] **Renew the allow list before it expires** (1 year max). Put a reminder in your calendar a couple of weeks
   before. If it lapses the dryers go offline, keep retrying and resetting every 5 min, and come back by
   themselves within about 5 min of being re-added; no reflash needed
@@ -281,6 +302,12 @@ Use the live readings page (`/test/live`, section 7). Write the numbers down for
 - Result: no login server that can refuse the boards, no personal password stored on them, about 100 KB less
   firmware, less memory used, and simpler Wi-Fi code. If the allow list lapses, the boards recover by
   themselves once re-added.
+- IST's networking team confirmed it (Nov 20): the Nov 17 eduroam rejections were their login server refusing
+  the anonymous outer identity ("12303 Failed to negotiate EAP because PEAP not allowed"), not our code. Since
+  Nov 18 dryer 1 has used only MAC authentication. IST asked that boards authenticate only to
+  UniversityOfWaterloo by MAC, so **every board must run the open-network firmware**; any board left on the
+  eduroam firmware keeps trying eduroam. Their logs also flag dryer 1's link as "low data rate" about 72% of the
+  time (2.4 GHz, access point WN-AP-STJRB-1855-B), consistent with the weak signal.
 
 **Full Wi-Fi transmit power (Nov 19-20, 2026):**
 - The dryers see the network at only about -77 dBm. They used to transmit at 11 dBm to limit current spikes on
@@ -309,10 +336,16 @@ Use the live readings page (`/test/live`, section 7). Write the numbers down for
   no reports between them. Check power first (section 2): dryer 2's crashes and freezes in Nov 2026 were its
   shared 4-way supply. If it continues on the standard per-pair power, swap the board.
 
-**Weekly email check:**
-- [ ] Script that reviews the week's test history and emails only on a serious issue: a node offline for hours,
-      a machine with no cycles for days, repeated reboots, a sensor fault, or two machines copying each other.
-- Runs automatically on a schedule (Mac launchd/cron, or a scheduled GitHub Action so the computer doesn't need
-  to be on).
+**Automatic health check** (`.github/workflows/health-check.yml`, `dashboard/scripts/healthCheck.js`):
+- Runs on GitHub every day, but only does the work when the newest summary in `health/HEALTH_SUMMARIES.md` is
+  4+ days old. It reads the last 2 days from the database, appends a summary (AI-written, with a numbers table)
+  to that file, and commits it. Clear the file whenever you like; the next run starts it again from line 1.
+- Only fixed rules (`RULES` in the script) decide what's a problem. When there is one, it opens a GitHub issue
+  that @mentions you, which GitHub emails to you. No problems, no email.
+- It only checks the pairs in `PAIRS` at the top of the script (pairs 1 and 2 for now). Change it to all 10 once
+  every board runs the new firmware.
+- Run it now: GitHub > Actions > Laundry health check > Run workflow, tick "force".
+- Its summary commits keep the repo active, so GitHub won't pause the schedule (it pauses after 60 days
+  without activity). Pull before you push, since it commits to `main` every 4 days.
 
 **Later:** security (device token on uploads, protected firmware updates), remote firmware updates (OTA).
