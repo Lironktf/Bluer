@@ -303,15 +303,17 @@ function usageStats(cycles, now) {
   const span = (h) => `${pad(h)}:00-${pad((h + 1) % 24)}:00`;
   const hours = minutesByHour.map((m, h) => ({ h, busy: Math.round((m / (60 * days)) * 100) / 100 }));
   const describe = ({ h, busy }) => `${span(h)} (${busy} of ${machineCount} machines running on average)`;
+  const partialDays = new Set([local(from).slice(0, 9), local(now).slice(0, 9)]);
   return {
     basedOn: `${machineCount} monitored machines from ${local(from)} to ${local(now)} (${days} days)`,
     washerCycles,
     dryerCycles,
     busiestHours: hours.filter(({ busy }) => busy > 0).sort((a, b) => b.busy - a.busy).slice(0, 3).map(describe),
     quietestDaytimeHours: hours.filter(({ h }) => h >= 8 && h < 23).sort((a, b) => a.busy - b.busy).slice(0, 3).map(describe),
+    // The first and last day are only partly covered, so their counts aren't comparable.
     byDay: Object.fromEntries(Object.entries(byDay).map(([day, d]) => {
       const top = d.minutesByHour.indexOf(Math.max(...d.minutesByHour));
-      return [day, { cyclesStarted: d.cycles, busiestHour: span(top) }];
+      return [day, { cyclesStarted: d.cycles, busiestHour: span(top), partialDay: partialDays.has(day) }];
     })),
   };
 }
@@ -578,8 +580,8 @@ THE SYSTEM
 
 THE INPUT (JSON)
 - window: the 2 days covered, local Waterloo time.
-- pairs: numbers for each pair. sends.deliveredPct = share of expected reports that arrived. gaps2min = silences of 2+ min. readings = share of 5 s readings stored. restarts.unplanned lists each unplanned restart. For each machine, highestReading is its highest reading while not running, startThreshold the value that starts a cycle (dryerOnThreshold or washerFirstFill), and reportsNearThreshold how many 30 s reports came within 85-100% of it while not running. shortestCycle, longestCycle, flappingCycleStarts, endedAtFullTimerTimes and endedAtMaxCapTimes give the times of those cycles.
-- usage: when the monitored machines were used over the last 4 days: busiestHours, quietestDaytimeHours (08:00-23:00), byDay (cycles started and busiest hour for each day, labelled with its weekday and date), and cycle totals.
+- pairs: numbers for each pair. sends.deliveredPct = share of expected reports that arrived. gaps2min = silences of 2+ min. readings = share of 5 s readings stored. restarts.unplanned lists each unplanned restart. For each machine, highestReading is its highest reading while not running, startThreshold the value that starts a cycle (dryerOnThreshold or washerFirstFill), and reportsNearThreshold how many 30 s reports came within 85-100% of it while not running. shortestCycle, longestCycle and flappingCycleStarts give the times of those cycles in the 2 days. endedAtFullTimerTimes and endedAtMaxCapTimes list when washer cycles ended exactly on the 25:00 timer or the 42:00 cap, over the last 4 days.
+- usage: when the monitored machines were used over the last 4 days: busiestHours, quietestDaytimeHours (08:00-23:00), byDay (cycles started and busiest hour for each day, labelled with its weekday and date; partialDay true means only part of that day is covered), and cycle totals.
 - findings: the problems found by fixed rules. Each has type, machine, detail.
 - previous: the same key numbers from the previous summary, or null.
 
@@ -587,7 +589,7 @@ RULES FOR YOU
 1. The findings list is the complete and only list of problems. Never add, drop, merge away or soften a finding. If findings is empty, there are no problems.
 2. Use only numbers and times that appear in the input. Never invent or estimate a number, time or cause. If something is unknown, write "unknown".
 3. Times are already local Waterloo time. Copy them as given. Whenever you mention a specific event (a cycle, a restart, a gap, a cycle that ended on a timer), give its time(s) from the input, for example "ended at the cap at Tue 11-24 19:42".
-4. Plain, short sentences. No emojis. No text before the first heading. Use exactly these headings, in this order:
+4. Plain, short sentences. No emojis. Never write input field names (such as deliveredPct, usage.basedOn or endedAtMaxCapTimes); say what they mean in plain words. No text before the first heading. Use exactly these headings, in this order:
 
 ### Verdict
 One sentence: "No problems found." or "<N> problem(s) need action: <machines>."
@@ -599,10 +601,10 @@ One bullet per finding: "**<machine>**: <what is wrong, with its numbers>. Likel
 2-4 bullets: the range of deliveredPct across the pairs, the worst pair, the hours with the most 2+ min gaps, and any pair that is silent.
 
 ### Cycles and detection
-2-4 bullets: busiest and quietest machines, typical cycle lengths, how close idle readings came to the start thresholds, and anything odd that is not a finding (call it "worth watching", not a problem, and give its time).
+2-5 bullets: busiest and quietest machines, typical cycle lengths, how close idle readings came to the start thresholds, and anything odd that is not a finding (call it "worth watching", not a problem, and give its time). Always list every washer cycle that ended exactly on the 25:00 timer or the 42:00 cap, with each end time, as worth watching (unless it is already a finding).
 
 ### Laundry room usage
-2-4 bullets for the residence, from "usage": the busiest times of day, the quietest daytime times, and which days were busiest and quietest, naming the weekday and date (for example "Sat 11-22") and that day's busiest hour. Say it is based on usage.basedOn.
+2-4 bullets for the residence: start with "Based on" followed by the text of usage.basedOn. Then the busiest times of day, the quietest daytime times, and which full days were busiest and quietest, naming the weekday and date (for example "Sat 11-22") and that day's busiest hour. Do not rank a partial day against full days; if you mention one, say it was only partly covered.
 
 ### Board health
 1-3 bullets: planned vs unplanned restarts, sensors, lowest free memory.
