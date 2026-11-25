@@ -4,7 +4,7 @@ name: Laundry health check
 # is 4+ days old. "Run workflow" with "force" ticked runs it now.
 on:
   schedule:
-    - cron: '0 13 * * *'  # 13:00 UTC = 8 am Waterloo in winter, 9 am in summer
+    - cron: '17 7 * * *'  # 07:17 UTC = 2:17 am Waterloo: low demand on the free AI, and off GitHub's busy top of the hour
   workflow_dispatch:
     inputs:
       force:
@@ -26,11 +26,11 @@ jobs:
     env:
       FORCE: ${{ inputs.force && '1' || '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Is it due?
         id: due
