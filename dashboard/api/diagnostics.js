@@ -81,7 +81,7 @@ function defaultThresholds(nodeId) {
 }
 
 // Saved configs predating a newly added threshold still get a complete set.
-function effectiveThresholds(nodeId, doc) {
+export function effectiveThresholds(nodeId, doc) {
   return { ...defaultThresholds(nodeId), ...(doc?.thresholds || {}) };
 }
 
