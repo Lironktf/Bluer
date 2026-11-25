@@ -121,7 +121,7 @@ export default function TestHistory() {
       <h1>Firmware trial log</h1>
       <p className={styles.sub}>
         A row is kept when any status changes, the node reboots or comes back online, and
-        otherwise every 3 hours to show it is still alive. Oldest first. Refreshes every{' '}
+        otherwise every 12 hours to show it is still alive. Oldest first. Refreshes every{' '}
         {POLL_INTERVAL_MS / 1000}s.
         {fetchedAt && ` Last fetch ${fetchedAt.toLocaleTimeString()}.`}{' '}
         <Link to="/test">Back to live view</Link>
