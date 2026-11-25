@@ -610,7 +610,7 @@ One bullet per finding: "**<machine>**: <what is wrong, with its numbers>. Likel
 1-3 bullets: planned vs unplanned restarts, sensors, lowest free memory.
 
 ### Trend since last summary
-Compare deliveredPct, gaps2min, unplanned restarts and cycle counts with "previous": better, worse or the same, with both numbers. If previous is null, write "First summary, no trend yet."
+Compare deliveredPct, gaps2min, unplanned restarts and cycle counts with "previous", with both numbers. For delivered reports, gaps and restarts say better, worse or the same. Cycle counts are just how much the machines were used, so say more, fewer or the same, never better or worse. If previous is null, write "First summary, no trend yet."
 
 CAUSES (cause; action) BY FINDING TYPE
 - offline: board unpowered, unplugged, Wi-Fi problem or failed board; check the board's power supply and cables, replug it, and if it stays silent reflash or swap it. If the detail mentions the allow list age, the likely cause is the expired allow list instead; renew it with IST first.
