@@ -340,6 +340,8 @@ Use the live readings page (`/test/live`, section 7). Write the numbers down for
 - Runs on GitHub every day, but only does the work when the newest summary in `health/HEALTH_SUMMARIES.md` is
   4+ days old. It reads the last 2 days from the database, appends a summary (AI-written, with a numbers table)
   to that file, and commits it. Clear the file whenever you like; the next run starts it again from line 1.
+- Repo secrets: `MONGODB_URI` (read-only database user) and `GEMINI_API_KEY` (Google AI Studio, free tier).
+  If the AI fails, a plain summary is written instead.
 - Only fixed rules (`RULES` in the script) decide what's a problem. When there is one, it opens a GitHub issue
   that @mentions you, which GitHub emails to you. No problems, no email.
 - It only checks the pairs in `PAIRS` at the top of the script (pairs 1 and 2 for now). Change it to all 10 once
