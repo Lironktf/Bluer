@@ -31,7 +31,7 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const RUN_EVERY_DAYS = 4;
 const WINDOW_MS = 2 * DAY;            // the summary covers the last 2 days
-const CYCLE_LOOKBACK_MS = 7 * DAY;    // cycle-pattern rules need ~10 cycles; a washer may do fewer in 2 days
+const CYCLE_LOOKBACK_MS = 4 * DAY;    // usage and washer-pattern data: one full run period (machineHistory keeps 30 days)
 const NO_CYCLES_LOOKBACK_MS = 3 * DAY;
 // Pairs checked by every rule. To monitor all boards: Array.from({ length: 10 }, (_, i) => i + 1)
 const PAIRS = [1, 2];
@@ -167,7 +167,7 @@ async function loadData(db, now) {
     db.collection('nodeConfigs').find({ nodeId: { $in: nodeIds } }).toArray(),
     db.collection('machineFlags').distinct('machineId', { clearedAt: null, until: { $gt: now } }),
     db.collection('machineReports').distinct('machineId', { type: 'broken', createdAt: { $gte: since } }),
-    // One document per report that reached the website: counts, plus each report's highest
+    // One document per report that reached the website: counts, plus each report's highest idle
     // dryer vibration (d[1]) and washer water level (w[1], w[2]) for the near-threshold check.
     db.collection('nodeTelemetry').aggregate([
       { $match: { nodeId: { $in: nodeIds }, ts: { $gte: since } } },
@@ -177,8 +177,15 @@ async function loadData(db, now) {
         ts: 1,
         nd: { $size: { $ifNull: ['$d', []] } },
         nw: { $size: { $ifNull: ['$w', []] } },
-        dMax: { $max: { $map: { input: { $ifNull: ['$d', []] }, as: 'r', in: { $arrayElemAt: ['$$r', 1] } } } },
-        wMax: { $max: { $map: { input: { $ifNull: ['$w', []] }, as: 'r', in: { $max: [{ $arrayElemAt: ['$$r', 1] }, { $arrayElemAt: ['$$r', 2] }] } } } },
+        // d rows: [age, avg10, doorJump, running, empty]; w rows: [age, water1, water2, doorDrop, running, empty]
+        dMax: { $max: { $map: {
+          input: { $filter: { input: { $ifNull: ['$d', []] }, cond: { $eq: [{ $arrayElemAt: ['$$this', 3] }, 0] } } },
+          as: 'r', in: { $arrayElemAt: ['$$r', 1] },
+        } } },
+        wMax: { $max: { $map: {
+          input: { $filter: { input: { $ifNull: ['$w', []] }, cond: { $eq: [{ $arrayElemAt: ['$$this', 4] }, 0] } } },
+          as: 'r', in: { $max: [{ $arrayElemAt: ['$$r', 1] }, { $arrayElemAt: ['$$r', 2] }] },
+        } } },
       } },
     ]).toArray(),
   ]);
@@ -268,6 +275,45 @@ function median(values) {
   const s = [...values].sort((a, b) => a - b);
   const mid = Math.floor(s.length / 2);
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+// When the monitored machines are busiest and quietest, for the residence.
+function usageStats(cycles, now) {
+  const from = now - CYCLE_LOOKBACK_MS;
+  const days = CYCLE_LOOKBACK_MS / DAY;
+  const machineCount = Object.keys(cycles).length;
+  const minutesByHour = new Array(24).fill(0);
+  const byDay = {};  // "Sat 11-22" -> { cycles, minutes by hour }
+  let washerCycles = 0;
+  let dryerCycles = 0;
+  for (const [id, list] of Object.entries(cycles)) {
+    for (const c of list) {
+      if (c.start < from) continue;
+      if (id.startsWith('sj-w')) washerCycles++;
+      else dryerCycles++;
+      const day = (byDay[local(c.start).slice(0, 9)] ||= { cycles: 0, minutesByHour: new Array(24).fill(0) });
+      day.cycles++;
+      for (let t = c.start; t < (c.end ?? now); t += MIN) {
+        minutesByHour[localHour(t)]++;
+        day.minutesByHour[localHour(t)]++;
+      }
+    }
+  }
+  const pad = (h) => String(h).padStart(2, '0');
+  const span = (h) => `${pad(h)}:00-${pad((h + 1) % 24)}:00`;
+  const hours = minutesByHour.map((m, h) => ({ h, busy: Math.round((m / (60 * days)) * 100) / 100 }));
+  const describe = ({ h, busy }) => `${span(h)} (${busy} of ${machineCount} machines running on average)`;
+  return {
+    basedOn: `${machineCount} monitored machines from ${local(from)} to ${local(now)} (${days} days)`,
+    washerCycles,
+    dryerCycles,
+    busiestHours: hours.filter(({ busy }) => busy > 0).sort((a, b) => b.busy - a.busy).slice(0, 3).map(describe),
+    quietestDaytimeHours: hours.filter(({ h }) => h >= 8 && h < 23).sort((a, b) => a.busy - b.busy).slice(0, 3).map(describe),
+    byDay: Object.fromEntries(Object.entries(byDay).map(([day, d]) => {
+      const top = d.minutesByHour.indexOf(Math.max(...d.minutesByHour));
+      return [day, { cyclesStarted: d.cycles, busiestHour: span(top) }];
+    })),
+  };
 }
 
 function restartsOf(rows, since) {
@@ -412,20 +458,23 @@ export function analyse(data, now, { thresholdsFor, allowDates }) {
       const done = inWindow.filter((c) => c.end != null);
       const lengths = done.map((c) => c.minutes);
       const flapping = inWindow.filter((c) => c.pieces >= RULES.flapPieces);
+      const byLength = [...done].sort((a, b) => a.minutes - b.minutes);
+      const cycleAt = (c) => (c ? { minutes: Math.round(c.minutes), started: local(c.start), ended: local(c.end) } : null);
       const info = {
         lastReport: m ? local(m.lastUpdate) : null,
         sensor: m?.sensorState ?? null,
         running: m?.running ?? null,
         cycles: inWindow.length,
         medianMin: lengths.length ? Math.round(median(lengths)) : null,
-        shortestMin: lengths.length ? Math.round(Math.min(...lengths)) : null,
-        longestMin: lengths.length ? Math.round(Math.max(...lengths)) : null,
+        shortestCycle: cycleAt(byLength[0]),
+        longestCycle: cycleAt(byLength[byLength.length - 1]),
         flappingCycles: flapping.length,
+        flappingCycleStarts: flapping.slice(-5).map((c) => `${local(c.start)} (${c.pieces} pieces)`),
         mostPiecesInOneCycle: inWindow.reduce((mx, c) => Math.max(mx, c.pieces), 0),
       };
 
       if (flapping.length >= RULES.flapCycles || info.mostPiecesInOneCycle >= RULES.flapPiecesSingle) {
-        add('flapping', id, `${flapping.length} cycles switched off and back on ${RULES.flapPieces - 1}+ times (worst cycle in ${info.mostPiecesInOneCycle} pieces).`);
+        add('flapping', id, `${flapping.length} cycles switched off and back on ${RULES.flapPieces - 1}+ times (worst cycle in ${info.mostPiecesInOneCycle} pieces); started ${info.flappingCycleStarts.join(', ')}.`);
       }
 
       const ongoing = all.find((c) => c.end == null);
@@ -434,25 +483,30 @@ export function analyse(data, now, { thresholdsFor, allowDates }) {
         if (!offline.has(n) && ongoing && ongoing.minutes > RULES.dryerStuckMin) {
           add('stuck_running', id, `Running for ${Math.round(ongoing.minutes)} min since ${local(ongoing.start)}.`);
         } else if (longOnes.length) {
-          add('stuck_running', id, `${longOnes.length} cycles longer than ${RULES.dryerStuckMin} min (longest ${info.longestMin} min).`);
+          add('stuck_running', id, `${longOnes.length} cycles longer than ${RULES.dryerStuckMin} min (longest ${info.longestCycle.minutes} min, started ${info.longestCycle.started}).`);
         }
       } else {
         const fullMin = thresholds.washerFullTimerMs / MIN;
         const capMin = thresholds.washerMaxCycleMs / MIN;
         const tol = RULES.timerEndToleranceS / 60;
         const lastDone = all.filter((c) => c.end != null).slice(-RULES.timerEndOutOf);
+        const atFull = lastDone.filter((c) => Math.abs(c.minutes - fullMin) <= tol);
+        const atCap = lastDone.filter((c) => Math.abs(c.minutes - capMin) <= tol);
         info.lastFinishedCycles = lastDone.length;
-        info.endedAtFullTimer = lastDone.filter((c) => Math.abs(c.minutes - fullMin) <= tol).length;
-        info.endedAtMaxCap = lastDone.filter((c) => Math.abs(c.minutes - capMin) <= tol).length;
+        info.endedAtFullTimer = atFull.length;
+        info.endedAtFullTimerTimes = atFull.map((c) => local(c.end));
+        info.endedAtMaxCap = atCap.length;
+        info.endedAtMaxCapTimes = atCap.map((c) => local(c.end));
         if (info.endedAtFullTimer >= RULES.timerEndMin) {
-          add('washer_timer_25', id, `${info.endedAtFullTimer} of the last ${lastDone.length} cycles ended at exactly ${round1(fullMin)} min (the first-fill timer).`);
+          add('washer_timer_25', id, `${info.endedAtFullTimer} of the last ${lastDone.length} cycles ended at exactly ${round1(fullMin)} min (the first-fill timer), at ${info.endedAtFullTimerTimes.join(', ')}.`);
         }
         if (info.endedAtMaxCap >= RULES.timerEndMin) {
-          add('washer_timer_cap', id, `${info.endedAtMaxCap} of the last ${lastDone.length} cycles ended at exactly ${round1(capMin)} min (the hard cap).`);
+          add('washer_timer_cap', id, `${info.endedAtMaxCap} of the last ${lastDone.length} cycles ended at exactly ${round1(capMin)} min (the hard cap), at ${info.endedAtMaxCapTimes.join(', ')}.`);
         }
-        info.shortCycles = done.filter((c) => c.minutes < RULES.washerShortMin).length;
+        const short = done.filter((c) => c.minutes < RULES.washerShortMin);
+        info.shortCycles = short.length;
         if (info.shortCycles >= RULES.washerShortCount) {
-          add('washer_short', id, `${info.shortCycles} cycles shorter than ${RULES.washerShortMin} min in 2 days.`);
+          add('washer_short', id, `${info.shortCycles} cycles shorter than ${RULES.washerShortMin} min in 2 days, starting ${short.map((c) => local(c.start)).join(', ')}.`);
         }
         if (!offline.has(n) && ongoing && ongoing.minutes > capMin + RULES.washerStuckExtraMin) {
           add('stuck_running', id, `Running for ${Math.round(ongoing.minutes)} min since ${local(ongoing.start)}.`);
@@ -506,7 +560,7 @@ export function analyse(data, now, { thresholdsFor, allowDates }) {
     add('prank', 'room', `All ${ids.length} monitored machines were reported or flagged broken in 2 days.`);
   }
 
-  return { pairs, findings, window: { from: local(since), to: local(now) } };
+  return { pairs, findings, usage: usageStats(cycles, now), window: { from: local(since), to: local(now) } };
 }
 
 // ---------- AI summary ----------
@@ -524,14 +578,15 @@ THE SYSTEM
 
 THE INPUT (JSON)
 - window: the 2 days covered, local Waterloo time.
-- pairs: numbers for each pair. sends.deliveredPct = share of expected reports that arrived. gaps2min = silences of 2+ min. readings = share of 5 s readings stored. restarts.unplanned lists each unplanned restart. For each machine, highestReading is its highest reading in 2 days, startThreshold the value that starts a cycle (dryerOnThreshold or washerFirstFill), and reportsNearThreshold how many 30 s reports came within 85-100% of it without crossing.
+- pairs: numbers for each pair. sends.deliveredPct = share of expected reports that arrived. gaps2min = silences of 2+ min. readings = share of 5 s readings stored. restarts.unplanned lists each unplanned restart. For each machine, highestReading is its highest reading while not running, startThreshold the value that starts a cycle (dryerOnThreshold or washerFirstFill), and reportsNearThreshold how many 30 s reports came within 85-100% of it while not running. shortestCycle, longestCycle, flappingCycleStarts, endedAtFullTimerTimes and endedAtMaxCapTimes give the times of those cycles.
+- usage: when the monitored machines were used over the last 4 days: busiestHours, quietestDaytimeHours (08:00-23:00), byDay (cycles started and busiest hour for each day, labelled with its weekday and date), and cycle totals.
 - findings: the problems found by fixed rules. Each has type, machine, detail.
 - previous: the same key numbers from the previous summary, or null.
 
 RULES FOR YOU
 1. The findings list is the complete and only list of problems. Never add, drop, merge away or soften a finding. If findings is empty, there are no problems.
 2. Use only numbers and times that appear in the input. Never invent or estimate a number, time or cause. If something is unknown, write "unknown".
-3. Times are already local Waterloo time. Copy them as given.
+3. Times are already local Waterloo time. Copy them as given. Whenever you mention a specific event (a cycle, a restart, a gap, a cycle that ended on a timer), give its time(s) from the input, for example "ended at the cap at Tue 11-24 19:42".
 4. Plain, short sentences. No emojis. No text before the first heading. Use exactly these headings, in this order:
 
 ### Verdict
@@ -544,7 +599,10 @@ One bullet per finding: "**<machine>**: <what is wrong, with its numbers>. Likel
 2-4 bullets: the range of deliveredPct across the pairs, the worst pair, the hours with the most 2+ min gaps, and any pair that is silent.
 
 ### Cycles and detection
-2-4 bullets: busiest and quietest machines, typical cycle lengths, how close idle readings came to the start thresholds, and anything odd that is not a finding (call it "worth watching", not a problem).
+2-4 bullets: busiest and quietest machines, typical cycle lengths, how close idle readings came to the start thresholds, and anything odd that is not a finding (call it "worth watching", not a problem, and give its time).
+
+### Laundry room usage
+2-4 bullets for the residence, from "usage": the busiest times of day, the quietest daytime times, and which days were busiest and quietest, naming the weekday and date (for example "Sat 11-22") and that day's busiest hour. Say it is based on usage.basedOn.
 
 ### Board health
 1-3 bullets: planned vs unplanned restarts, sensors, lowest free memory.
@@ -641,7 +699,7 @@ async function aiSummary(payload) {
           const replacement = error.status === 404 && /use (?:models\/)?(gemini-[\w.-]*\w)/i.exec(error.body || '');
           if (replacement && !tried.has(replacement[1])) queue.unshift(replacement[1]);
           if (![429, 503].includes(error.status) || attempt === 2) break;
-          await sleep((attempt + 1) * 15000);
+          await sleep((attempt + 1) * 30000);
         }
       }
     }
@@ -744,7 +802,7 @@ async function main() {
   const summaryText = readSummaryFile();
   const result = analyse(data, now.getTime(), { thresholdsFor: effectiveThresholds, allowDates: allowListDates() });
   const previous = previousStats(summaryText);
-  const ai = await aiSummary({ window: result.window, pairs: result.pairs, findings: result.findings, previous });
+  const ai = await aiSummary({ window: result.window, pairs: result.pairs, findings: result.findings, usage: result.usage, previous });
   const summary = ai || plainSummary(result);
   const alert = result.findings.length > 0;
 
