@@ -677,6 +677,10 @@ async function main() {
   } finally {
     await client.close();
   }
+  // None of the monitored machines at all means the wrong database, not every board offline.
+  if (data.machines.length === 0) {
+    throw new Error(`No monitored machines found in database "${db.databaseName}". Set MONGODB_DB in the workflow to the database the website uses.`);
+  }
 
   const summaryText = readSummaryFile();
   const result = analyse(data, now.getTime(), { thresholdsFor: effectiveThresholds, allowDates: allowListDates() });
