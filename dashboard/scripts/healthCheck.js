@@ -35,6 +35,9 @@ const CYCLE_LOOKBACK_MS = 4 * DAY;    // usage and washer-pattern data: one full
 const NO_CYCLES_LOOKBACK_MS = 3 * DAY;
 // Pairs checked by every rule. To monitor all boards: Array.from({ length: 10 }, (_, i) => i + 1)
 const PAIRS = [1, 2];
+// Pairs whose sticker numbers are this close are neighbours (a pair's own dryer and washer always are).
+// Only neighbours are named as the likely cause of a false start or a washer cycle ending on a timer.
+const NEARBY_PAIRS = 1;
 const TZ = 'America/Toronto';
 // The -latest aliases follow Google's current Flash models, so they survive model retirements.
 const AI_MODELS = (process.env.AI_MODEL || 'gemini-flash-latest,gemini-3.8-flash,gemini-flash-lite-latest,gemini-3.5-flash-lite')
@@ -70,6 +73,9 @@ const RULES = {
   nearThresholdShare: 0.85,   // ...and its readings reached 85-100% of its start threshold
   nearThresholdReports: 10,   // ...in at least this many 30 s reports (a machine nobody uses stays far below)
   configPendingHours: 24,
+  crosstalkRuns: 3,           // look back over this many earlier summaries (plus this run)...
+  crosstalkMin: 3,            // ...alert if a washer had this many 25:00 (or 42:00) endings while the same neighbour ran...
+  crosstalkShare: 0.75,       // ...and they were at least this share of its 25:00 (or 42:00) endings
   allowListWarnDays: 350,     // IST allow list lasts 1 year
   inactivityWarnDays: 50,     // GitHub pauses scheduled workflows after 60 days without repo activity
 };
@@ -87,10 +93,13 @@ const RESET_REASONS = {
 
 const SUMMARY_HEADING = /^## Health summary (\d{4}-\d{2}-\d{2})/gm;
 const STATS_MARKER = /<!-- health-stats (\{.*?\}) -->/g;
+const EVENTS_MARKER = /<!-- health-events (\[.*?\]) -->/g;
 
 const dryerId = (n) => `sj-d${n}`;
 const washerId = (n) => `sj-w${n}`;
 const nodeIdOf = (n) => `sj-${n}`;
+const pairOf = (id) => Number(/(\d+)$/.exec(id)[1]);
+const nearby = (a, b) => Math.abs(pairOf(a) - pairOf(b)) <= NEARBY_PAIRS;
 const ms = (d) => new Date(d).getTime();
 const round1 = (x) => Math.round(x * 10) / 10;
 const utcDay = (d) => new Date(d).toISOString().slice(0, 10);
@@ -148,6 +157,17 @@ function previousStats(text) {
   } catch {
     return null;
   }
+}
+
+// Washer timer/cap endings saved by the last few summaries, for patterns that build up over weeks.
+function previousEvents(text) {
+  return [...text.matchAll(EVENTS_MARKER)].slice(-RULES.crosstalkRuns).flatMap((m) => {
+    try {
+      return JSON.parse(m[1]);
+    } catch {
+      return [];
+    }
+  });
 }
 
 // ---------- Loading ----------
@@ -361,7 +381,7 @@ function sensorBadMinutes(rows, since, now) {
 
 // ---------- Analysis ----------
 
-export function analyse(data, now, { thresholdsFor, allowDates }) {
+export function analyse(data, now, { thresholdsFor, allowDates, pastEvents = [] }) {
   const since = now - WINDOW_MS;
   const findings = [];
   const add = (type, machine, detail) => findings.push({ type, machine, detail });
@@ -390,6 +410,7 @@ export function analyse(data, now, { thresholdsFor, allowDates }) {
   }
   const runningAt = (id, t) => cycles[id].some((c) => c.start - 2 * MIN <= t && t <= (c.end ?? now) + 2 * MIN);
   const worthWatching = [];  // notable but not problems; the summary must list every one, with its times
+  const events = [];         // washer timer/cap endings, saved with the summary for the cross-talk rule
 
   const pairs = [];
   const offline = new Set();
@@ -438,10 +459,12 @@ export function analyse(data, now, { thresholdsFor, allowDates }) {
     // Highest readings vs the threshold that starts a cycle
     for (const [id, key, threshold] of [[dId, 'dMax', thresholds.dryerOnThreshold], [wId, 'wMax', thresholds.washerFirstFill]]) {
       const values = docs.map((d) => d[key]).filter((v) => typeof v === 'number');
+      // Below the threshold only: an idle 5 s reading above it is just the moment a cycle starts or stops.
+      const below = values.filter((v) => v < threshold);
       near[id] = {
         threshold,
-        highest: values.length ? round1(Math.max(...values)) : null,
-        reportsNear: values.filter((v) => v >= RULES.nearThresholdShare * threshold && v < threshold).length,
+        highest: below.length ? round1(Math.max(...below)) : null,
+        reportsNear: below.filter((v) => v >= RULES.nearThresholdShare * threshold).length,
       };
     }
 
@@ -499,14 +522,14 @@ export function analyse(data, now, { thresholdsFor, allowDates }) {
       if (falseStarts.length) {
         const alongside = {};
         for (const c of falseStarts) {
-          for (const other of Object.keys(cycles)) if (other !== id && runningAt(other, c.start)) alongside[other] = (alongside[other] || 0) + 1;
+          for (const other of Object.keys(cycles)) if (other !== id && nearby(id, other) && runningAt(other, c.start)) alongside[other] = (alongside[other] || 0) + 1;
         }
         const [topOther, topCount] = Object.entries(alongside).sort((a, b) => b[1] - a[1])[0] || [];
         const times = falseStarts.map((c) => local(c.start));
         worthWatching.push({
           times,
           text: `${id}: ${falseStarts.length} false start(s) in 2 days (ran under ${RULES.falseStartMin} min, not counted as cycles) at ${times.join(', ')}`
-            + (topOther ? `; ${topCount} of them while ${topOther} was running.` : '; no other monitored machine was running at those times.'),
+            + (topOther ? `; ${topCount} of them while neighbour ${topOther} was running.` : '; no neighbouring machine was running at those times.'),
         });
       }
 
@@ -525,20 +548,27 @@ export function analyse(data, now, { thresholdsFor, allowDates }) {
         const lastDone = all.filter((c) => c.end != null).slice(-RULES.timerEndOutOf);
         const atFull = lastDone.filter((c) => Math.abs(c.minutes - fullMin) <= tol);
         const atCap = lastDone.filter((c) => Math.abs(c.minutes - capMin) <= tol);
+        // A neighbouring washer filling at the same time can be heard as this one's refill.
+        const otherWashers = (c) => Object.keys(cycles)
+          .filter((o) => o !== id && o.startsWith('sj-w') && nearby(id, o) && cycles[o].some((x) => x.start < c.end && (x.end ?? now) > c.start));
+        const endedAt = (c) => `${local(c.end)}${otherWashers(c).length ? ` (${otherWashers(c).join(', ')} also running)` : ''}`;
+        for (const [kind, list] of [['full', atFull], ['cap', atCap]]) {
+          for (const c of list) events.push({ id, kind, end: new Date(c.end).toISOString(), with: otherWashers(c) });
+        }
         info.lastFinishedCycles = lastDone.length;
         info.endedAtFullTimer = atFull.length;
         info.endedAtFullTimerTimes = atFull.map((c) => local(c.end));
         info.endedAtMaxCap = atCap.length;
         info.endedAtMaxCapTimes = atCap.map((c) => local(c.end));
         if (info.endedAtFullTimer >= RULES.timerEndMin) {
-          add('washer_timer_25', id, `${info.endedAtFullTimer} of the last ${lastDone.length} cycles ended at exactly ${round1(fullMin)} min (the first-fill timer), at ${info.endedAtFullTimerTimes.join(', ')}.`);
+          add('washer_timer_25', id, `${info.endedAtFullTimer} of the last ${lastDone.length} cycles ended at exactly ${round1(fullMin)} min (the first-fill timer), at ${atFull.map(endedAt).join(', ')}.`);
         } else if (atFull.length) {
-          worthWatching.push({ times: info.endedAtFullTimerTimes, text: `${id}: ${atFull.length} cycle(s) ended exactly on the ${round1(fullMin)} min first-fill timer (no refill detected) at ${info.endedAtFullTimerTimes.join(', ')}.` });
+          worthWatching.push({ times: info.endedAtFullTimerTimes, text: `${id}: ${atFull.length} cycle(s) ended exactly on the ${round1(fullMin)} min first-fill timer (no refill detected) at ${atFull.map(endedAt).join(', ')}.` });
         }
         if (info.endedAtMaxCap >= RULES.timerEndMin) {
-          add('washer_timer_cap', id, `${info.endedAtMaxCap} of the last ${lastDone.length} cycles ended at exactly ${round1(capMin)} min (the hard cap), at ${info.endedAtMaxCapTimes.join(', ')}.`);
+          add('washer_timer_cap', id, `${info.endedAtMaxCap} of the last ${lastDone.length} cycles ended at exactly ${round1(capMin)} min (the hard cap), at ${atCap.map(endedAt).join(', ')}.`);
         } else if (atCap.length) {
-          worthWatching.push({ times: info.endedAtMaxCapTimes, text: `${id}: ${atCap.length} cycle(s) ran to the ${round1(capMin)} min hard cap at ${info.endedAtMaxCapTimes.join(', ')}.` });
+          worthWatching.push({ times: info.endedAtMaxCapTimes, text: `${id}: ${atCap.length} cycle(s) ran to the ${round1(capMin)} min hard cap at ${atCap.map(endedAt).join(', ')}.` });
         }
         const short = done.filter((c) => c.minutes < RULES.washerShortMin);
         info.shortCycles = short.length;
@@ -591,13 +621,34 @@ export function analyse(data, now, { thresholdsFor, allowDates }) {
     }
   }
 
+  // A washer that keeps ending on a timer while the same neighbour runs is hearing that neighbour.
+  const seen = new Set();
+  const allEvents = [...pastEvents, ...events].filter((e) => {
+    const key = `${e.id}|${e.kind}|${e.end}`;
+    if (seen.has(key) || !PAIRS.includes(pairOf(e.id))) return false;
+    seen.add(key);
+    return true;
+  });
+  for (const id of ids.filter((x) => x.startsWith('sj-w'))) {
+    for (const kind of ['full', 'cap']) {
+      const mine = allEvents.filter((e) => e.id === id && e.kind === kind);
+      const byNeighbour = {};
+      for (const e of mine) for (const o of e.with || []) (byNeighbour[o] ||= []).push(e);
+      for (const [other, list] of Object.entries(byNeighbour)) {
+        if (list.length >= RULES.crosstalkMin && list.length >= RULES.crosstalkShare * mine.length) {
+          add('washer_crosstalk', id, `${list.length} of its last ${mine.length} ${kind === 'cap' ? '42:00 hard-cap' : '25:00 first-fill-timer'} endings happened while neighbour ${other} was also running (${list.map((e) => local(e.end)).join(', ')}).`);
+        }
+      }
+    }
+  }
+
   // Prank: every monitored machine reported broken at once
   const reportedBroken = ids.filter((id) => data.activeFlags.includes(id) || data.brokenReported.includes(id));
   if (reportedBroken.length === ids.length) {
     add('prank', 'room', `All ${ids.length} monitored machines were reported or flagged broken in 2 days.`);
   }
 
-  return { pairs, findings, worthWatching, usage: usageStats(cycles, now), window: { from: local(since), to: local(now) } };
+  return { pairs, findings, worthWatching, events, usage: usageStats(cycles, now), window: { from: local(since), to: local(now) } };
 }
 
 // ---------- AI summary ----------
@@ -615,7 +666,7 @@ THE SYSTEM
 
 THE INPUT (JSON)
 - window: the 2 days covered, local Waterloo time.
-- pairs: numbers for each pair. sends.deliveredPct = share of expected reports that arrived. gaps2min = silences of 2+ min. readings = share of 5 s readings stored. restarts.unplanned lists each unplanned restart. For each machine, highestReading is its highest reading while not running, startThreshold the value that starts a cycle (dryerOnThreshold or washerFirstFill), and reportsNearThreshold how many 30 s reports came within 85-100% of it while not running. shortestCycle, longestCycle and flappingCycleStarts give the times of those cycles in the 2 days. endedAtFullTimerTimes and endedAtMaxCapTimes list when washer cycles ended exactly on the 25:00 timer or the 42:00 cap, over the last 4 days.
+- pairs: numbers for each pair. sends.deliveredPct = share of expected reports that arrived. gaps2min = silences of 2+ min. readings = share of 5 s readings stored. restarts.unplanned lists each unplanned restart. For each machine, highestReading is its highest reading while not running and below its threshold, startThreshold the value that starts a cycle (dryerOnThreshold or washerFirstFill), and reportsNearThreshold how many 30 s reports came within 85-100% of it while not running. shortestCycle, longestCycle and flappingCycleStarts give the times of those cycles in the 2 days. endedAtFullTimerTimes and endedAtMaxCapTimes list when washer cycles ended exactly on the 25:00 timer or the 42:00 cap, over the last 4 days.
 - usage: when the monitored machines were used over the last 4 days: busiestHours, quietestDaytimeHours (08:00-23:00), byDay (cycles started and busiest hour for each day, labelled with its weekday and date; partialDay true means only part of that day is covered), and cycle totals.
 - findings: the problems found by fixed rules. Each has type, machine, detail.
 - worthWatching: notable things that are not problems (false starts, washer cycles that ended on a timer), each with its times, already written as a sentence.
@@ -637,7 +688,7 @@ One bullet per finding: "**<machine>**: <what is wrong, with its numbers>. Likel
 2-4 bullets: the range of deliveredPct across the pairs, the worst pair, how many 2+ min gaps each pair had and the hours with the most (with their counts), and any pair that is silent.
 
 ### Cycles and detection
-2-5 bullets: busiest and quietest machines, typical cycle lengths, and how close idle readings came to the start thresholds (with the highest idle reading against the threshold). Cycle counts and lengths already exclude false starts. Then one bullet per worthWatching item, starting "Worth watching:", keeping all of its times.
+2-5 bullets: busiest and quietest machines, typical cycle lengths, and how close each machine came to falsely starting while idle, in plain words, for example: "While idle, dryer sj-d2's highest reading was 4.2, just under the 4.51 that starts a cycle; 15 reports came within 15% of it." Group machines that never came close into one short sentence. Cycle counts and lengths already exclude false starts. Then one bullet per worthWatching item, starting "Worth watching:", keeping all of its times.
 
 ### Laundry room usage
 2-4 bullets for the residence: start with "Based on" followed by the text of usage.basedOn. Then the busiest times of day, the quietest daytime times, and which full days were busiest and quietest, naming the weekday and date (for example "Sat 11-22") and that day's busiest hour. Do not rank a partial day against full days; if you mention one, say it was only partly covered.
@@ -658,6 +709,7 @@ CAUSES (cause; action) BY FINDING TYPE
 - flapping: the reading dips below the threshold mid-cycle; for a dryer lower dryerOnThreshold a little, for a washer check its board's power and mounting.
 - stuck_running: the reading stays above the threshold after the cycle (often a neighbour's vibration) or the sensor is stuck; raise the threshold a little and check the sensor mounting.
 - copying: one machine's vibration or sound sets off the other; raise the threshold of the machine that follows the other, or add foam.
+- washer_crosstalk: this washer hears its neighbour's water. Run both washers at the same time and watch this washer's water readings on /test/live while the neighbour fills. For 42:00 hard-cap endings, raise this washer's washerRefill above what it hears from the neighbour; for 25:00 endings the neighbour's fill probably started it falsely, so raise its washerFirstFill. Change a little at a time on /test/nodes.
 - no_cycles: the machine is being used but its readings stop just short of the start threshold; lower dryerOnThreshold (dryer) or washerFirstFill (washer) a little on /test/nodes, and check the sensor mounting.
 - config_pending: the board hasn't picked up thresholds saved on /test/nodes; check that it is online, then save again.
 - unplanned_restarts: power-on or brownout means a power problem (check the supply, splitter and cables); crash, watchdog or software restart means a firmware problem (note it for the developer).
@@ -866,7 +918,9 @@ async function main() {
   }
 
   const summaryText = readSummaryFile();
-  const result = analyse(data, now.getTime(), { thresholdsFor: effectiveThresholds, allowDates: allowListDates() });
+  const result = analyse(data, now.getTime(), {
+    thresholdsFor: effectiveThresholds, allowDates: allowListDates(), pastEvents: previousEvents(summaryText),
+  });
   const previous = previousStats(summaryText);
   const ai = await aiSummary({ window: result.window, pairs: result.pairs, findings: result.findings, worthWatching: result.worthWatching.map((w) => w.text), usage: result.usage, previous });
   let summary = ai || plainSummary(result);
@@ -888,6 +942,7 @@ async function main() {
     '</details>',
     '',
     `<!-- health-stats ${JSON.stringify(keyStats(result.pairs))} -->`,
+    `<!-- health-events ${JSON.stringify(result.events)} -->`,
   ].join('\n');
 
   let issueBody = null;
