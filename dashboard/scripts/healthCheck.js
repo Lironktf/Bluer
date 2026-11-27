@@ -39,6 +39,8 @@ const TZ = 'America/Toronto';
 // The -latest aliases follow Google's current Flash models, so they survive model retirements.
 const AI_MODELS = (process.env.AI_MODEL || 'gemini-flash-latest,gemini-3.8-flash,gemini-flash-lite-latest,gemini-3.5-flash-lite')
   .split(',').map((m) => m.trim());
+// The free tier is often "busy" for full Flash: keep retrying it for ~15 min before settling for Lite.
+const FULL_FLASH_WAITS_MIN = [0, 2, 4, 8];
 const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta';
 
 // Everything that can trigger an alert. Change a number here to make a rule stricter or looser.
@@ -54,6 +56,7 @@ const RULES = {
   timerEndOutOf: 10,          // look at the last 10 finished washer cycles...
   timerEndMin: 5,             // ...alert if this many ended on the same timer
   mergeGapMin: 5,             // running pieces closer than this are one cycle
+  falseStartMin: 2,           // a "cycle" that ran less than this in total is a false start: reported, not counted
   flapPieces: 4,              // a cycle made of this many running pieces is "flapping"
   flapCycles: 2,              // alert if this many flapping cycles in 2 days...
   flapPiecesSingle: 6,        // ...or one cycle with this many pieces
@@ -259,14 +262,19 @@ function cyclesOf(records, now) {
   const cycles = [];
   for (const p of pieces) {
     const last = cycles[cycles.length - 1];
+    const ran = (p.end ?? now) - p.start;
     if (last && last.end != null && p.start - last.end < RULES.mergeGapMin * MIN) {
       last.end = p.end;
       last.pieces++;
+      last.runMs += ran;
     } else {
-      cycles.push({ start: p.start, end: p.end, pieces: 1 });
+      cycles.push({ start: p.start, end: p.end, pieces: 1, runMs: ran });
     }
   }
-  for (const c of cycles) c.minutes = ((c.end ?? now) - c.start) / MIN;
+  for (const c of cycles) {
+    c.minutes = ((c.end ?? now) - c.start) / MIN;
+    c.falseStart = c.end != null && c.runMs < RULES.falseStartMin * MIN;
+  }
   return cycles;
 }
 
@@ -374,8 +382,14 @@ export function analyse(data, now, { thresholdsFor, allowDates }) {
 
   const cycles = {};
   for (const n of PAIRS) {
-    for (const id of [dryerId(n), washerId(n)]) cycles[id] = cyclesOf(historyBy[id] || [], now);
+    for (const id of [dryerId(n), washerId(n)]) {
+      const list = cyclesOf(historyBy[id] || [], now);
+      cycles[id] = list.filter((c) => !c.falseStart);
+      cycles[id].falseStarts = list.filter((c) => c.falseStart);
+    }
   }
+  const runningAt = (id, t) => cycles[id].some((c) => c.start - 2 * MIN <= t && t <= (c.end ?? now) + 2 * MIN);
+  const worthWatching = [];  // notable but not problems; the summary must list every one, with its times
 
   const pairs = [];
   const offline = new Set();
@@ -479,6 +493,23 @@ export function analyse(data, now, { thresholdsFor, allowDates }) {
         add('flapping', id, `${flapping.length} cycles switched off and back on ${RULES.flapPieces - 1}+ times (worst cycle in ${info.mostPiecesInOneCycle} pieces); started ${info.flappingCycleStarts.join(', ')}.`);
       }
 
+      // Brief false "running" blips: often a neighbour (e.g. the washer underneath spinning) shaking the sensor.
+      const falseStarts = all.falseStarts.filter((c) => c.start >= since);
+      info.falseStarts = falseStarts.length;
+      if (falseStarts.length) {
+        const alongside = {};
+        for (const c of falseStarts) {
+          for (const other of Object.keys(cycles)) if (other !== id && runningAt(other, c.start)) alongside[other] = (alongside[other] || 0) + 1;
+        }
+        const [topOther, topCount] = Object.entries(alongside).sort((a, b) => b[1] - a[1])[0] || [];
+        const times = falseStarts.map((c) => local(c.start));
+        worthWatching.push({
+          times,
+          text: `${id}: ${falseStarts.length} false start(s) in 2 days (ran under ${RULES.falseStartMin} min, not counted as cycles) at ${times.join(', ')}`
+            + (topOther ? `; ${topCount} of them while ${topOther} was running.` : '; no other monitored machine was running at those times.'),
+        });
+      }
+
       const ongoing = all.find((c) => c.end == null);
       if (kind === 'dryer') {
         const longOnes = done.filter((c) => c.minutes > RULES.dryerStuckMin);
@@ -501,9 +532,13 @@ export function analyse(data, now, { thresholdsFor, allowDates }) {
         info.endedAtMaxCapTimes = atCap.map((c) => local(c.end));
         if (info.endedAtFullTimer >= RULES.timerEndMin) {
           add('washer_timer_25', id, `${info.endedAtFullTimer} of the last ${lastDone.length} cycles ended at exactly ${round1(fullMin)} min (the first-fill timer), at ${info.endedAtFullTimerTimes.join(', ')}.`);
+        } else if (atFull.length) {
+          worthWatching.push({ times: info.endedAtFullTimerTimes, text: `${id}: ${atFull.length} cycle(s) ended exactly on the ${round1(fullMin)} min first-fill timer (no refill detected) at ${info.endedAtFullTimerTimes.join(', ')}.` });
         }
         if (info.endedAtMaxCap >= RULES.timerEndMin) {
           add('washer_timer_cap', id, `${info.endedAtMaxCap} of the last ${lastDone.length} cycles ended at exactly ${round1(capMin)} min (the hard cap), at ${info.endedAtMaxCapTimes.join(', ')}.`);
+        } else if (atCap.length) {
+          worthWatching.push({ times: info.endedAtMaxCapTimes, text: `${id}: ${atCap.length} cycle(s) ran to the ${round1(capMin)} min hard cap at ${info.endedAtMaxCapTimes.join(', ')}.` });
         }
         const short = done.filter((c) => c.minutes < RULES.washerShortMin);
         info.shortCycles = short.length;
@@ -562,7 +597,7 @@ export function analyse(data, now, { thresholdsFor, allowDates }) {
     add('prank', 'room', `All ${ids.length} monitored machines were reported or flagged broken in 2 days.`);
   }
 
-  return { pairs, findings, usage: usageStats(cycles, now), window: { from: local(since), to: local(now) } };
+  return { pairs, findings, worthWatching, usage: usageStats(cycles, now), window: { from: local(since), to: local(now) } };
 }
 
 // ---------- AI summary ----------
@@ -583,6 +618,7 @@ THE INPUT (JSON)
 - pairs: numbers for each pair. sends.deliveredPct = share of expected reports that arrived. gaps2min = silences of 2+ min. readings = share of 5 s readings stored. restarts.unplanned lists each unplanned restart. For each machine, highestReading is its highest reading while not running, startThreshold the value that starts a cycle (dryerOnThreshold or washerFirstFill), and reportsNearThreshold how many 30 s reports came within 85-100% of it while not running. shortestCycle, longestCycle and flappingCycleStarts give the times of those cycles in the 2 days. endedAtFullTimerTimes and endedAtMaxCapTimes list when washer cycles ended exactly on the 25:00 timer or the 42:00 cap, over the last 4 days.
 - usage: when the monitored machines were used over the last 4 days: busiestHours, quietestDaytimeHours (08:00-23:00), byDay (cycles started and busiest hour for each day, labelled with its weekday and date; partialDay true means only part of that day is covered), and cycle totals.
 - findings: the problems found by fixed rules. Each has type, machine, detail.
+- worthWatching: notable things that are not problems (false starts, washer cycles that ended on a timer), each with its times, already written as a sentence.
 - previous: the same key numbers from the previous summary, or null.
 
 RULES FOR YOU
@@ -598,10 +634,10 @@ One sentence: "No problems found." or "<N> problem(s) need action: <machines>."
 One bullet per finding: "**<machine>**: <what is wrong, with its numbers>. Likely cause: <cause>. Do: <action>." Take cause and action from the CAUSES list for its type. If there are no findings, write "None."
 
 ### Connection
-2-4 bullets: the range of deliveredPct across the pairs, the worst pair, the hours with the most 2+ min gaps, and any pair that is silent.
+2-4 bullets: the range of deliveredPct across the pairs, the worst pair, how many 2+ min gaps each pair had and the hours with the most (with their counts), and any pair that is silent.
 
 ### Cycles and detection
-2-5 bullets: busiest and quietest machines, typical cycle lengths, how close idle readings came to the start thresholds, and anything odd that is not a finding (call it "worth watching", not a problem, and give its time). Always list every washer cycle that ended exactly on the 25:00 timer or the 42:00 cap, with each end time, as worth watching (unless it is already a finding).
+2-5 bullets: busiest and quietest machines, typical cycle lengths, and how close idle readings came to the start thresholds (with the highest idle reading against the threshold). Cycle counts and lengths already exclude false starts. Then one bullet per worthWatching item, starting "Worth watching:", keeping all of its times.
 
 ### Laundry room usage
 2-4 bullets for the residence: start with "Based on" followed by the text of usage.basedOn. Then the busiest times of day, the quietest daytime times, and which full days were busiest and quietest, naming the weekday and date (for example "Sat 11-22") and that day's busiest hour. Do not rank a partial day against full days; if you mention one, say it was only partly covered.
@@ -677,6 +713,41 @@ async function aiSummary(payload) {
   };
 
   const tried = new Set();
+  const generate = async (model) => {
+    const json = await geminiCall(`models/${model}:generateContent`, key, request);
+    const text = (json.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('').trim()
+      .replace(/^```(?:markdown)?\s*|\s*```$/g, '');
+    if (text.startsWith('### Verdict')) {
+      console.log(`AI summary written by ${model}.`);
+      return text;
+    }
+    console.error(`AI model ${model} returned an unexpected format (finish reason ${json.candidates?.[0]?.finishReason ?? 'unknown'}).`);
+    return null;
+  };
+  // A retired model's error names its replacement ("use models/gemini-..."): try that next.
+  const replacementFor = (error) => error.status === 404 && /use (?:models\/)?(gemini-[\w.-]*\w)/i.exec(error.body || '')?.[1];
+
+  // Full Flash first, in rounds spread over ~15 min while it's busy (503) or rate-limited (429).
+  const full = AI_MODELS.filter((m) => !/lite/.test(m));
+  for (const waitMin of FULL_FLASH_WAITS_MIN) {
+    if (waitMin) await sleep(waitMin * MIN);
+    let busy = false;
+    for (let i = 0; i < full.length; i++) {
+      const model = full[i];
+      try {
+        const text = await generate(model);
+        if (text) return text;
+      } catch (error) {
+        console.error(`AI model ${model} failed: ${error.message}`);
+        const next = replacementFor(error);
+        if (next && !full.includes(next)) full.push(next);
+        if ([429, 503].includes(error.status)) busy = true;
+      }
+    }
+    if (!busy) break;
+  }
+  full.forEach((m) => tried.add(m));
+
   const tryModels = async (models) => {
     const queue = [...models];
     while (queue.length) {
@@ -686,20 +757,13 @@ async function aiSummary(payload) {
       // Busy (503) or rate-limited (429): wait and retry the same model twice before moving on.
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          const json = await geminiCall(`models/${model}:generateContent`, key, request);
-          const text = (json.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('').trim()
-            .replace(/^```(?:markdown)?\s*|\s*```$/g, '');
-          if (text.startsWith('### Verdict')) {
-            console.log(`AI summary written by ${model}.`);
-            return text;
-          }
-          console.error(`AI model ${model} returned an unexpected format (finish reason ${json.candidates?.[0]?.finishReason ?? 'unknown'}).`);
+          const text = await generate(model);
+          if (text) return text;
           break;
         } catch (error) {
           console.error(`AI model ${model} failed: ${error.message}`);
-          // A retired model's error names its replacement ("use models/gemini-..."): try that next.
-          const replacement = error.status === 404 && /use (?:models\/)?(gemini-[\w.-]*\w)/i.exec(error.body || '');
-          if (replacement && !tried.has(replacement[1])) queue.unshift(replacement[1]);
+          const next = replacementFor(error);
+          if (next && !tried.has(next)) queue.unshift(next);
           if (![429, 503].includes(error.status) || attempt === 2) break;
           await sleep((attempt + 1) * 30000);
         }
@@ -708,7 +772,7 @@ async function aiSummary(payload) {
     return null;
   };
 
-  const text = await tryModels(AI_MODELS);
+  const text = await tryModels(AI_MODELS.filter((m) => /lite/.test(m)));
   if (text) return text;
   try {
     return await tryModels(await currentFlashModels(key));
@@ -804,8 +868,11 @@ async function main() {
   const summaryText = readSummaryFile();
   const result = analyse(data, now.getTime(), { thresholdsFor: effectiveThresholds, allowDates: allowListDates() });
   const previous = previousStats(summaryText);
-  const ai = await aiSummary({ window: result.window, pairs: result.pairs, findings: result.findings, usage: result.usage, previous });
-  const summary = ai || plainSummary(result);
+  const ai = await aiSummary({ window: result.window, pairs: result.pairs, findings: result.findings, worthWatching: result.worthWatching.map((w) => w.text), usage: result.usage, previous });
+  let summary = ai || plainSummary(result);
+  // Whatever the model wrote, every worth-watching item ends up in the summary.
+  const missed = result.worthWatching.filter((w) => !w.times.every((t) => summary.includes(t)));
+  if (missed.length) summary += `\n\n### Also worth watching\n${missed.map((w) => `- ${w.text}`).join('\n')}`;
   const alert = result.findings.length > 0;
 
   const entry = [
