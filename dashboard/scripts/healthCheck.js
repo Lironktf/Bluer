@@ -463,7 +463,7 @@ export function analyse(data, now, { thresholdsFor, allowDates, pastEvents = [] 
       const below = values.filter((v) => v < threshold);
       near[id] = {
         threshold,
-        highest: below.length ? round1(Math.max(...below)) : null,
+        highest: below.length ? Math.round(Math.max(...below) * 100) / 100 : null,
         reportsNear: below.filter((v) => v >= RULES.nearThresholdShare * threshold).length,
       };
     }
